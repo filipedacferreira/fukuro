@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { motion } from 'motion/react'
 import { ArrowLeft } from 'lucide-react'
 import { IconButton } from '@/foundations/ui/button/button'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
@@ -25,27 +26,12 @@ export function Editor({ projectId, projectName, onBack }: EditorProps) {
       .finally(() => setLoading(false))
   }, [projectId])
 
-  const handleReorder = async (orderedIds: string[]) => {
-    const reordered = orderedIds
-      .map((id) => chapters.find((c) => c.id === id))
-      .filter((c): c is Chapter => c !== undefined)
-    setChapters(reordered)
-
+  const handleReorder = async (newChapters: Chapter[]) => {
+    setChapters(newChapters)
     try {
-      await api.reorderChapters(orderedIds)
+      await api.reorderChapters(newChapters.map((c) => c.id))
     } catch (e) {
       toast({ title: 'Failed to save order', description: String(e), variant: 'negative' })
-    }
-  }
-
-  const handleRename = async (id: string, name: string) => {
-    setChapters((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, displayName: name } : c))
-    )
-    try {
-      await api.renameChapter(id, name)
-    } catch (e) {
-      toast({ title: 'Failed to rename chapter', description: String(e), variant: 'negative' })
     }
   }
 
@@ -76,6 +62,7 @@ export function Editor({ projectId, projectName, onBack }: EditorProps) {
           variant="ghost"
           size="sm"
           aria-label="Back to projects"
+          title="Back to projects"
           onClick={onBack}
         >
           <ArrowLeft className="size-4" />
@@ -84,7 +71,7 @@ export function Editor({ projectId, projectName, onBack }: EditorProps) {
       </header>
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
+        <motion.div layoutScroll className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="space-y-1 p-4">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -95,12 +82,11 @@ export function Editor({ projectId, projectName, onBack }: EditorProps) {
             <ChapterList
               chapters={chapters}
               onReorder={handleReorder}
-              onRename={handleRename}
-              onExclusionChange={handleExclusionChange}
+onExclusionChange={handleExclusionChange}
               onImageDeleted={handleImageDeleted}
             />
           )}
-        </div>
+        </motion.div>
 
         <ExportPanel projectId={projectId} hasChapters={chapters.length > 0} />
       </div>

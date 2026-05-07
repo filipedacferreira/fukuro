@@ -122,13 +122,13 @@ function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
   })
 
   return (
-    <li className="group flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 transition hover:bg-background-secondary">
+    <li className="group relative rounded-xl border border-border bg-background transition hover:bg-background-secondary active:bg-foreground/5">
       <button
-        className="flex flex-1 cursor-pointer flex-col gap-0.5 text-left"
+        className="flex w-full cursor-pointer flex-col gap-0.5 px-4 py-3 text-left"
         onClick={onOpen}
       >
         <span className="font-medium">{project.name}</span>
-        <span className="text-xs text-foreground-secondary truncate max-w-[500px]">
+        <span className="max-w-[500px] truncate text-xs text-foreground-secondary">
           {project.rootPath}
         </span>
         <span className="text-xs text-foreground-secondary">
@@ -136,32 +136,35 @@ function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
         </span>
       </button>
 
-      <Dialog>
-        <Dialog.Trigger asChild>
-          <IconButton
-            variant="ghost"
-            size="sm"
-            aria-label="Delete project"
-            className="opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <Trash2 className="size-4" />
-          </IconButton>
-        </Dialog.Trigger>
-        <Dialog.Content className="w-80">
-          <Dialog.Title>Delete project?</Dialog.Title>
-          <Dialog.Description>
-            This removes the project from fukuro. Your manga files won't be deleted.
-          </Dialog.Description>
-          <Dialog.Actions>
-            <Dialog.Close asChild>
-              <Button variant="destructive" onClick={onDelete}>Delete</Button>
-            </Dialog.Close>
-            <Dialog.Close asChild>
-              <Button variant="outline">Cancel</Button>
-            </Dialog.Close>
-          </Dialog.Actions>
-        </Dialog.Content>
-      </Dialog>
+      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+        <Dialog>
+          <Dialog.Trigger asChild>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              aria-label="Delete project"
+              title="Delete project"
+              className="opacity-0 transition-opacity group-hover:opacity-100"
+            >
+              <Trash2 className="size-4" />
+            </IconButton>
+          </Dialog.Trigger>
+          <Dialog.Content className="w-80">
+            <Dialog.Title>Delete project?</Dialog.Title>
+            <Dialog.Description>
+              This removes the project from fukuro. Your manga files won't be deleted.
+            </Dialog.Description>
+            <Dialog.Actions>
+              <Dialog.Close asChild>
+                <Button variant="destructive" onClick={onDelete}>Delete</Button>
+              </Dialog.Close>
+              <Dialog.Close asChild>
+                <Button variant="outline">Cancel</Button>
+              </Dialog.Close>
+            </Dialog.Actions>
+          </Dialog.Content>
+        </Dialog>
+      </div>
     </li>
   )
 }

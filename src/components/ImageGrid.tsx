@@ -129,52 +129,51 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
   const optimizing = image.thumbnailPath === image.path
 
   return (
-    <div className="group relative">
-      <button
-        className={cn(
-          'relative block w-full overflow-hidden rounded-lg border border-border cursor-pointer',
-          'transition-all duration-150',
-          image.isExcluded && 'opacity-40 grayscale'
-        )}
-        onClick={onToggle}
-        title={image.isExcluded ? 'Click to include' : 'Click to exclude'}
-      >
-        <img
-          src={src}
-          alt={image.filename}
-          className={cn('aspect-[2/3] w-full object-cover transition-[filter] duration-300', optimizing && 'blur-sm')}
-          loading="lazy"
-        />
-        {optimizing && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Spinner className="size-4 text-foreground-secondary" />
-          </div>
-        )}
-        {image.isExcluded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/60">
-            <EyeOff className="size-6 text-foreground-secondary" />
-          </div>
-        )}
-      </button>
+    <div>
+      <div className="group/card relative">
+        <button
+          className={cn(
+            'relative block w-full overflow-hidden rounded-lg border border-border cursor-pointer',
+            'transition-all duration-150 hover:border-foreground/30 active:scale-[0.98]',
+            image.isExcluded && 'opacity-40 grayscale'
+          )}
+          onClick={onToggle}
+          title={image.isExcluded ? 'Click to include' : 'Click to exclude'}
+        >
+          <img
+            src={src}
+            alt={image.filename}
+            width={200}
+            height={300}
+            className={cn('aspect-[2/3] w-full object-cover transition-[filter] duration-300', optimizing && 'blur-sm')}
+            loading="lazy"
+          />
+          {optimizing && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Spinner className="size-4 text-foreground-secondary" />
+            </div>
+          )}
+          {image.isExcluded && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+              <EyeOff className="size-6 text-foreground-secondary" />
+            </div>
+          )}
+        </button>
 
-      <p className="mt-1 truncate px-0.5 text-center text-2xs text-foreground-secondary">
-        {image.filename}
-      </p>
-
-      <Dialog>
-        <Dialog.Trigger asChild>
-          <button
-            className={cn(
-              'absolute top-1 right-1 flex size-6 items-center justify-center rounded-md',
-              'bg-background/80 text-foreground-secondary backdrop-blur-sm',
-              'opacity-0 group-hover:opacity-100 transition-opacity',
-              'hover:text-error hover:bg-error/10'
-            )}
-            aria-label={`Delete ${image.filename} from disk`}
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        </Dialog.Trigger>
+        <Dialog>
+          <Dialog.Trigger asChild>
+            <button
+              className={cn(
+                'absolute top-1 right-1 flex size-6 items-center justify-center rounded-md',
+                'bg-background/80 text-foreground-secondary backdrop-blur-sm',
+                'opacity-0 group-hover/card:opacity-100 transition active:scale-90 cursor-pointer',
+                'hover:text-error hover:bg-error/10'
+              )}
+              aria-label={`Delete ${image.filename} from disk`}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </Dialog.Trigger>
         <Dialog.Content className="w-80">
           <Dialog.Title>Delete file?</Dialog.Title>
           <Dialog.Description>
@@ -188,8 +187,13 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
               <Button variant="outline">Cancel</Button>
             </Dialog.Close>
           </Dialog.Actions>
-        </Dialog.Content>
-      </Dialog>
+          </Dialog.Content>
+        </Dialog>
+      </div>
+
+      <p className="mt-1 truncate px-0.5 text-center text-2xs text-foreground-secondary">
+        {image.filename}
+      </p>
     </div>
   )
 }
