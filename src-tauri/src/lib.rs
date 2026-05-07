@@ -47,6 +47,17 @@ pub fn run() {
                         .build()?,
                 )
                 .item(
+                    &SubmenuBuilder::new(app, "Edit")
+                        .item(&PredefinedMenuItem::undo(app, None)?)
+                        .item(&PredefinedMenuItem::redo(app, None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::cut(app, None)?)
+                        .item(&PredefinedMenuItem::copy(app, None)?)
+                        .item(&PredefinedMenuItem::paste(app, None)?)
+                        .item(&PredefinedMenuItem::select_all(app, None)?)
+                        .build()?,
+                )
+                .item(
                     &SubmenuBuilder::new(app, "Tools")
                         // MenuItemBuilder::with_id gives this item a string ID so we can
                         // match it in on_menu_event below.
@@ -86,6 +97,7 @@ pub fn run() {
             commands::projects::create_project,
             commands::projects::list_projects,
             commands::projects::delete_project,
+            commands::projects::rename_project,
             commands::projects::get_project_chapters,
             commands::chapters::reorder_chapters,
             commands::chapters::rename_chapter,

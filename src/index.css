@@ -112,3 +112,8 @@ img {
   -webkit-user-drag: none;
   user-select: none;
 }
+
+::selection {
+  color: var(--color-background);
+  background-color: var(--color-foreground);
+}

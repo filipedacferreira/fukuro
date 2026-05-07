@@ -61,7 +61,7 @@ export function ChapterItem({
       )}
     >
       <button
-        className="shrink-0 p-2 -m-2 cursor-grab touch-none text-foreground-secondary transition-colors hover:text-foreground active:cursor-grabbing"
+        className="shrink-0 p-2 -m-2 cursor-grab touch-none text-foreground-secondary transition hover:text-foreground active:cursor-grabbing rounded focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring"
         aria-label="Drag to reorder"
         onPointerDown={(e) => controls.start(e)}
         onClick={(e) => e.stopPropagation()}
@@ -77,7 +77,7 @@ export function ChapterItem({
         {isRenaming ? (
           <input
             ref={inputRef}
-            className="flex-1 min-w-0 bg-transparent outline-none text-sm font-medium text-foreground"
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm font-medium text-foreground rounded transition focus-visible:ring-(length:--ring-width) ring-ring"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitRename}
@@ -94,7 +94,7 @@ export function ChapterItem({
             <button
               type="button"
               aria-label="Rename chapter"
-              className="shrink-0 p-1.5 -m-1.5 opacity-0 group-hover:opacity-100 text-foreground-secondary transition-opacity hover:text-foreground cursor-pointer active:opacity-70"
+              className="shrink-0 p-1.5 -m-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-foreground-secondary transition hover:text-foreground cursor-pointer active:opacity-70 rounded focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()

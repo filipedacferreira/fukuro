@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderOpen, Trash2 } from 'lucide-react'
+import { FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@/foundations/ui/button/button'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
 import { Dialog } from '@/foundations/ui/dialog/dialog'
@@ -37,6 +37,10 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
     } finally {
       setOpening(false)
     }
+  }
+
+  const handleRename = (id: string, newName: string) => {
+    setProjects((prev) => prev.map((p) => p.id === id ? { ...p, name: newName } : p))
   }
 
   const handleDelete = async (id: string) => {
@@ -79,6 +83,7 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
                 project={project}
                 onOpen={() => onOpenProject(project.id, project.name)}
                 onDelete={() => handleDelete(project.id)}
+                onRename={handleRename}
               />
             ))}
           </ul>
@@ -112,9 +117,44 @@ interface ProjectRowProps {
   project: Project
   onOpen: () => void
   onDelete: () => void
+  onRename: (id: string, newName: string) => void
 }
 
-function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
+function ProjectRow({ project, onOpen, onDelete, onRename }: ProjectRowProps) {
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [localName, setLocalName] = useState(project.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming) inputRef.current?.focus()
+  }, [isRenaming])
+
+  function startRenaming() {
+    setDraft(localName)
+    setIsRenaming(true)
+  }
+
+  function cancelRename() {
+    setIsRenaming(false)
+    setDraft('')
+  }
+
+  async function commitRename() {
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== localName) {
+      try {
+        await api.renameProject(project.id, trimmed)
+        setLocalName(trimmed)
+        onRename(project.id, trimmed)
+      } catch (e) {
+        toast({ title: 'Failed to rename project', description: String(e), variant: 'negative' })
+      }
+    }
+    setIsRenaming(false)
+    setDraft('')
+  }
+
   const date = new Date(project.createdAt * 1000).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'short',
@@ -124,10 +164,42 @@ function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
   return (
     <li className="group relative rounded-xl border border-border bg-background transition hover:bg-background-secondary active:bg-foreground/5">
       <button
-        className="flex w-full cursor-pointer flex-col gap-0.5 px-4 py-3 text-left"
-        onClick={onOpen}
+        className="flex w-full flex-col gap-0.5 px-4 py-3 text-left rounded-xl transition focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring"
+        style={{ cursor: isRenaming ? 'default' : 'pointer' }}
+        onClick={() => { if (!isRenaming) onOpen() }}
       >
-        <span className="font-medium">{project.name}</span>
+        <div className="flex items-center gap-2">
+          {isRenaming ? (
+            <input
+              ref={inputRef}
+              className="flex-1 min-w-0 bg-transparent outline-none font-medium text-foreground rounded transition focus-visible:ring-(length:--ring-width) ring-ring"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') cancelRename()
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <>
+              <span className="font-medium truncate">{localName}</span>
+              <button
+                type="button"
+                aria-label="Rename project"
+                className="shrink-0 p-1 -m-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-foreground-secondary transition hover:text-foreground cursor-pointer active:opacity-70 rounded focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  startRenaming()
+                }}
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </>
+          )}
+        </div>
         <span className="max-w-[500px] truncate text-xs text-foreground-secondary">
           {project.rootPath}
         </span>
@@ -144,7 +216,7 @@ function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
               size="sm"
               aria-label="Delete project"
               title="Delete project"
-              className="opacity-0 transition-opacity group-hover:opacity-100"
+              className="opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
             >
               <Trash2 className="size-4" />
             </IconButton>

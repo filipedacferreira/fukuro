@@ -134,7 +134,7 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
         <button
           className={cn(
             'relative block w-full overflow-hidden rounded-lg border border-border cursor-pointer',
-            'transition-all duration-150 hover:border-foreground/30 active:scale-[0.98]',
+            'transition-all duration-150 hover:border-foreground/30 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring',
             image.isExcluded && 'opacity-40 grayscale'
           )}
           onClick={onToggle}
@@ -166,8 +166,8 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
               className={cn(
                 'absolute top-1 right-1 flex size-6 items-center justify-center rounded-md',
                 'bg-background/80 text-foreground-secondary backdrop-blur-sm',
-                'opacity-0 group-hover/card:opacity-100 transition active:scale-90 cursor-pointer',
-                'hover:text-error hover:bg-error/10'
+                'opacity-0 group-hover/card:opacity-100 focus-visible:opacity-100 transition active:scale-90 cursor-pointer',
+                'hover:text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-(length:--ring-width) ring-ring'
               )}
               aria-label={`Delete ${image.filename} from disk`}
             >

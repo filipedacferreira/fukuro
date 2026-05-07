@@ -173,6 +173,21 @@ pub fn delete_project(id: String, state: tauri::State<DbState>) -> Result<(), St
     Ok(())
 }
 
+#[tauri::command]
+pub fn rename_project(
+    id: String,
+    name: String,
+    state: tauri::State<DbState>,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE projects SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Returns all chapters for a project, ordered by sort_order.
 // Also rescans the project's root folder for any new subdirectories added since the
 // project was created, inserting them as new chapters at the end of the list.
