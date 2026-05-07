@@ -54,4 +54,4 @@ Produces a native binary for the current platform. For a Windows `.exe` / `.msi`
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[GPL-3.0](LICENSE)
