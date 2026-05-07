@@ -96,7 +96,7 @@ excluded_images
 3. Rust scans the folder for immediate subdirectories (non-recursive), counts images per subfolder, and inserts them into the DB ordered by filesystem filename sort (the initial best guess at order)
 4. The new project is returned to the frontend and the editor view is loaded
 
-Re-opening a project from the home screen just loads the existing DB rows — no re-scan happens. If you add new chapter folders to the root after the initial scan, use "Rescan" (not yet built; planned for iteration 2).
+Re-opening a project from the home screen calls `get_project_chapters`, which also rescans the root folder for new subdirectories and inserts them as chapters at the end of the sort order. Existing chapters — including any custom ordering or renames — are left untouched.
 
 ### Reordering chapters
 
@@ -116,15 +116,27 @@ Clicking the expand arrow on a chapter row loads the `ImageGrid` component, whic
 2. Scans the folder for image files (jpg, jpeg, png, webp, gif, avif)
 3. Applies a **natural sort** algorithm so `2.jpg` comes before `10.jpg`
 4. Queries `excluded_images` for this chapter and sets `isExcluded` on each image
+5. Returns `thumbnailPath` for each image — the cached 200 px thumbnail path if it exists, or the original path as fallback
 
 In the grid, clicking an image thumbnail **toggles its exclusion state**:
 - Excluded images get a desaturated overlay with an eye-slash icon
 - The chapter badge shows active count + strikethrough excluded count
 - The toggle is optimistic — UI updates immediately, DB write happens in background
 
-The trash icon on each thumbnail triggers a confirmation dialog before calling `hard_delete_image`, which removes the file from disk and cleans up any exclusion row.
+The trash icon on each thumbnail triggers a confirmation dialog before calling `hard_delete_image`, which removes the file from disk, deletes its cached thumbnail, and cleans up any exclusion row.
 
 Images are served to the `<img>` tag using `convertFileSrc()` from `@tauri-apps/api/core`, which translates absolute file paths to Tauri's `asset://localhost/...` URL scheme.
+
+#### Thumbnail optimisation
+
+After `get_chapter_images` returns, `ImageGrid` checks whether any images lack a cached thumbnail (`thumbnailPath === path`). If so, it calls `generate_chapter_thumbnails_stream`, which:
+
+1. Spawns a detached OS thread immediately and returns — the IPC call resolves without blocking
+2. Inside the thread, processes all images in parallel via `rayon`
+3. For each image: decodes with the `image` crate, resizes to 200 px wide with `fast_image_resize` (SIMD bilinear), encodes as JPEG at quality 75, writes to `{AppData}/thumbnails/{chapter_id}/{stem}.jpg`
+4. Emits a `ThumbnailUpdate { imagePath, thumbnailPath }` event through a Tauri Channel for each completed thumbnail
+
+The frontend listens on the Channel and swaps each image's `src` in as its thumbnail arrives. Images without a ready thumbnail render blurred with a spinner overlay. On subsequent opens the cached thumbnails load instantly.
 
 ### Exporting
 
@@ -163,6 +175,8 @@ Single DELETE on `projects`. `ON DELETE CASCADE` handles chapters and excluded_i
 
 Ordered by `sort_order`. Subquery counts `excluded_count` per chapter inline.
 
+Also rescans the project's `root_path` for subdirectories not yet in the DB. New entries are inserted at the end of the sort order (`MAX(sort_order) + 1 + i`). The DB lock is held only for the query + insert phase — no thumbnail generation happens here.
+
 ### `reorder_chapters(chapterIds: Vec<String>) → ()`
 
 Iterates the incoming ordered array and issues `UPDATE chapters SET sort_order = {i} WHERE id = {id}` for each. Called after every drag-and-drop.
@@ -175,7 +189,19 @@ Simple `UPDATE` of `display_name`. Does not touch the filesystem.
 
 Acquires the DB lock to read `folder_path` and collect excluded paths into a `HashSet<String>`, then releases the lock. Reads the directory from disk, filters to image extensions, applies `natural_sort_key`, and annotates each entry with `isExcluded`.
 
+Also resolves `thumbnailPath` for each image: checks whether `{AppData}/thumbnails/{chapter_id}/{stem}.jpg` exists. If it does, that path is returned; otherwise `path` (the original) is used as fallback. No thumbnail generation happens in this command — it only reads the cache.
+
 The natural sort key function splits a filename into alternating text and zero-padded numeric segments, producing a comparable `Vec<String>`. This ensures `ch10.jpg` sorts after `ch9.jpg`.
+
+### `generate_chapter_thumbnails_stream(chapterId: String, onEvent: Channel<ThumbnailUpdate>) → ()`
+
+Returns immediately after spawning a detached OS thread. The thread scans the chapter folder, generates thumbnails in parallel via `rayon`, and streams `{ imagePath, thumbnailPath }` events through the Tauri Channel as each thumbnail completes. Skips images whose thumbnail already exists in cache.
+
+Thumbnail spec: 200 px wide, proportional height, JPEG quality 75, bilinear filter via `fast_image_resize`.
+
+### `clear_thumbnail_cache() → ()`
+
+Deletes `{AppData}/thumbnails/` and all its contents. Exposed as **Tools → Clear Thumbnail Cache** in the native menu bar — not surfaced in the UI.
 
 ### `toggle_exclusion(chapterId: String, imagePath: String) → bool`
 
@@ -183,7 +209,7 @@ Checks for an existing row in `excluded_images`. If present, deletes it and retu
 
 ### `hard_delete_image(chapterId: String, path: String) → ()`
 
-`std::fs::remove_file(path)` then DELETE from `excluded_images`. The chapter's `image_count` in DB is intentionally not updated here — it was cached at scan time and the frontend tracks the live count in component state.
+`std::fs::remove_file(path)`, then deletes the corresponding thumbnail from `{AppData}/thumbnails/{chapter_id}/{stem}.jpg` if it exists, then DELETE from `excluded_images`. The chapter's `image_count` in DB is intentionally not updated here — it was cached at scan time and the frontend tracks the live count in component state.
 
 ### `create_cbz(projectId: String, outputPath: String) → String`
 
@@ -238,24 +264,6 @@ A thin typed wrapper over `invoke()` from `@tauri-apps/api/core`. Every Rust com
 
 ---
 
-## What's not built yet (planned for future iterations)
+## What's not built yet
 
-### Volume grouping
-
-The DB schema is already ready for it: add a `volumes` table (`id`, `project_id`, `display_name`, `sort_order`) and a nullable `volume_id FK` on `chapters`. The `create_cbz` command would accept a volume ID and filter chapters accordingly. The UI would add a volume grouping layer above the chapter list.
-
-### Re-scan
-
-If you add new chapter folders after the initial project creation, there is currently no way to pick them up without deleting and recreating the project. A "Rescan" button would diff the current folder contents against the existing `chapters` rows and insert new ones (without touching the user's custom ordering or rename work).
-
-### Windows build via CI
-
-The app targets Windows as the primary distribution platform. The build pipeline (GitHub Actions Windows runner) is not set up yet — this is manual for now. See `CLAUDE.md` for the planned CI configuration.
-
-### Thumbnail caching
-
-Currently, the `ImageGrid` calls `convertFileSrc()` to load images via Tauri's asset protocol. On first load of a large chapter (100+ high-res pages), this can be slow. A future improvement would have the Rust backend generate small thumbnail versions on first access and cache them in the app data directory.
-
-### Settings
-
-No settings screen exists. Obvious candidates when needed: default export location, theme override, thumbnail size in the grid.
+See [`roadmap.md`](./roadmap.md).
