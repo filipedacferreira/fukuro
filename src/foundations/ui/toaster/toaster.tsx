@@ -1,8 +1,4 @@
-import {
-  CheckCircleIcon,
-  XCircleIcon,
-  XIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { CheckCircle, XCircle, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { ComponentPropsWithoutRef } from 'react';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
@@ -160,7 +156,7 @@ const ToasterItem = ({ toast: t, onDismiss }: ToasterItemProps) => {
   const { title, description, variant = 'default' } = t;
   const reduceMotion = useReducedMotion();
 
-  const Icon = { default: null, positive: CheckCircleIcon, negative: XCircleIcon }[variant];
+  const Icon = { default: null, positive: CheckCircle, negative: XCircle }[variant];
 
   return (
     <motion.div
@@ -177,7 +173,7 @@ const ToasterItem = ({ toast: t, onDismiss }: ToasterItemProps) => {
       exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.8, y: '-100%' }}
       transition={{ type: 'spring', bounce: 0.2, duration: 0.5 }}
     >
-      {Icon && <Icon weight="fill" className="size-5" />}
+      {Icon && <Icon className="size-5" />}
       <div className="pr-6 text-sm">
         <p className="font-medium">{title}</p>
         {description && (
@@ -202,7 +198,7 @@ const ToastCloseButton = ({
       'after:absolute after:inset-0 after:bg-current after:opacity-0 hover:after:opacity-4 active:after:opacity-8'
     )}
   >
-    <XIcon className="size-3 opacity-50" />
+    <X className="size-3 opacity-50" />
   </button>
 );
 

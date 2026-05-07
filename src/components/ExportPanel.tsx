@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { save } from '@tauri-apps/plugin-dialog'
-import { ArchiveIcon } from '@phosphor-icons/react/dist/ssr'
+import { Archive } from 'lucide-react'
 import { Button } from '@/foundations/ui/button/button'
 import { toast } from '@/foundations/ui/toaster/toaster'
 import { api } from '@/lib/tauri'
@@ -46,7 +46,7 @@ export function ExportPanel({ projectId, hasChapters }: ExportPanelProps) {
         disabled={!hasChapters || exporting}
         size="sm"
       >
-        <ArchiveIcon />
+        <Archive className="size-4" />
         Export CBZ
       </Button>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { TrashIcon, EyeSlashIcon } from '@phosphor-icons/react/dist/ssr'
+import { Trash2, EyeOff } from 'lucide-react'
 import { Button } from '@/foundations/ui/button/button'
 import { Dialog } from '@/foundations/ui/dialog/dialog'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
@@ -120,7 +120,7 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
         />
         {image.isExcluded && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60">
-            <EyeSlashIcon className="size-6 text-foreground-secondary" />
+            <EyeOff className="size-6 text-foreground-secondary" />
           </div>
         )}
       </button>
@@ -140,7 +140,7 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
             )}
             aria-label={`Delete ${image.filename} from disk`}
           >
-            <TrashIcon className="size-3.5" />
+            <Trash2 className="size-3.5" />
           </button>
         </Dialog.Trigger>
         <Dialog.Content className="w-80">

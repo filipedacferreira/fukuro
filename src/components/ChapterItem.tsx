@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { CaretDownIcon, DotsSixVerticalIcon } from '@phosphor-icons/react/dist/ssr'
+import { ChevronDown, GripVertical } from 'lucide-react'
 import { Input } from '@/foundations/ui/input/input'
 import { cn } from '@/lib/utils/classnames'
 import { ImageGrid } from '@/components/ImageGrid'
@@ -78,7 +78,7 @@ export function ChapterItem({
           {...attributes}
           {...listeners}
         >
-          <DotsSixVerticalIcon className="size-4" />
+          <GripVertical className="size-4" />
         </button>
 
         {/* index badge */}
@@ -128,7 +128,7 @@ export function ChapterItem({
           aria-label={expanded ? 'Collapse images' : 'Expand images'}
           onClick={() => setExpanded((v) => !v)}
         >
-          <CaretDownIcon
+          <ChevronDown
             className={cn('size-4 transition-transform duration-200', expanded && 'rotate-180')}
           />
         </button>

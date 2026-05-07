@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderOpenIcon, TrashIcon, BookOpenIcon } from '@phosphor-icons/react/dist/ssr'
+import { FolderOpen, Trash2, BookOpen } from 'lucide-react'
 import { Button, IconButton } from '@/foundations/ui/button/button'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
 import { Dialog } from '@/foundations/ui/dialog/dialog'
@@ -53,11 +53,11 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-6 py-4">
         <div className="flex items-center gap-2">
-          <BookOpenIcon className="size-5" />
+          <BookOpen className="size-5" />
           <h1 className="text-base font-semibold">fukuro</h1>
         </div>
         <Button onClick={handleOpenFolder} isLoading={opening} size="sm">
-          <FolderOpenIcon />
+          <FolderOpen className="size-4" />
           Open folder
         </Button>
       </header>
@@ -92,7 +92,7 @@ function EmptyState({ onOpen, opening }: { onOpen: () => void; opening: boolean 
   return (
     <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-4 text-center">
       <div className="rounded-2xl border border-border bg-background-secondary p-6">
-        <BookOpenIcon className="size-12 text-foreground-secondary" />
+        <BookOpen className="size-12 text-foreground-secondary" />
       </div>
       <div>
         <p className="font-medium">No manga projects yet</p>
@@ -101,7 +101,7 @@ function EmptyState({ onOpen, opening }: { onOpen: () => void; opening: boolean 
         </p>
       </div>
       <Button onClick={onOpen} isLoading={opening} variant="outline">
-        <FolderOpenIcon />
+        <FolderOpen className="size-4" />
         Open a manga folder
       </Button>
     </div>
@@ -144,7 +144,7 @@ function ProjectRow({ project, onOpen, onDelete }: ProjectRowProps) {
             aria-label="Delete project"
             className="opacity-0 group-hover:opacity-100 transition-opacity"
           >
-            <TrashIcon />
+            <Trash2 className="size-4" />
           </IconButton>
         </Dialog.Trigger>
         <Dialog.Content className="w-80">

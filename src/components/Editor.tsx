@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeftIcon } from '@phosphor-icons/react/dist/ssr'
+import { ArrowLeft } from 'lucide-react'
 import { IconButton } from '@/foundations/ui/button/button'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
 import { toast } from '@/foundations/ui/toaster/toaster'
@@ -78,7 +78,7 @@ export function Editor({ projectId, projectName, onBack }: EditorProps) {
           aria-label="Back to projects"
           onClick={onBack}
         >
-          <ArrowLeftIcon />
+          <ArrowLeft className="size-4" />
         </IconButton>
         <h1 className="flex-1 truncate text-sm font-semibold">{projectName}</h1>
       </header>
