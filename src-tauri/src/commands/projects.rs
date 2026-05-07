@@ -78,7 +78,7 @@ pub fn create_project(root_path: String, state: tauri::State<DbState>) -> Result
     entries.sort_by_key(|e| e.file_name());
 
     for (i, entry) in entries.iter().enumerate() {
-        let folder_path = entry.path().to_string_lossy().to_string();
+        let folder_path = entry.path().to_string_lossy().replace('\\', "/");
         let display_name = entry.file_name().to_string_lossy().to_string();
         let chapter_id = Uuid::new_v4().to_string();
         let image_count = count_images_in_dir(&entry.path());

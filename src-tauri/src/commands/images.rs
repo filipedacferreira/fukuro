@@ -78,9 +78,10 @@ pub fn get_chapter_images(
                 .prepare("SELECT image_path FROM excluded_images WHERE chapter_id = ?1")
                 .map_err(|e| e.to_string())?;
             let result: HashSet<String> = stmt
-                .query_map(params![chapter_id], |row| row.get(0))
+                .query_map(params![chapter_id], |row| row.get::<_, String>(0))
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
+                .map(|p| p.replace('\\', "/"))
                 .collect();
             result
         };
@@ -96,7 +97,7 @@ pub fn get_chapter_images(
                 && is_image_file(e.path().as_path())
         })
         .map(|e| {
-            let path = e.path().to_string_lossy().to_string();
+            let path = e.path().to_string_lossy().replace('\\', "/");
             let filename = e.file_name().to_string_lossy().to_string();
             let is_excluded = excluded.contains(&path);
             ImageMeta { path, filename, is_excluded }
