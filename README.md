@@ -1,8 +1,8 @@
-# fukuro
+# Fukurō
 
 A desktop utility for batching manga chapters into `.cbz` files.
 
-Manga chapters arrive as folders of numbered images with inconsistent names and unwanted extra pages. fukuro lets you reorder chapters by drag-and-drop, rename them, mark images for exclusion, and export everything as a single `.cbz` in one click — with page order preserved.
+Manga chapters arrive as folders of numbered images with inconsistent names and unwanted extra pages. Fukurō lets you reorder chapters by drag-and-drop, rename them, mark images for exclusion, and export everything as a single `.cbz` in one click — with page order preserved.
 
 ---
 

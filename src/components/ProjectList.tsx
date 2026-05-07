@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderOpen, Trash2, BookOpen } from 'lucide-react'
+import { FolderOpen, Trash2 } from 'lucide-react'
 import { Button, IconButton } from '@/foundations/ui/button/button'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
 import { Dialog } from '@/foundations/ui/dialog/dialog'
@@ -53,8 +53,8 @@ export function ProjectList({ onOpenProject }: ProjectListProps) {
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border px-6 py-4">
         <div className="flex items-center gap-2">
-          <BookOpen className="size-5" />
-          <h1 className="text-base font-semibold">fukuro</h1>
+          <span className="text-base leading-none">梟</span>
+          <h1 className="text-base font-semibold">Fukurō</h1>
         </div>
         <Button onClick={handleOpenFolder} isLoading={opening} size="sm">
           <FolderOpen className="size-4" />
@@ -92,7 +92,7 @@ function EmptyState({ onOpen, opening }: { onOpen: () => void; opening: boolean 
   return (
     <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-4 text-center">
       <div className="rounded-2xl border border-border bg-background-secondary p-6">
-        <BookOpen className="size-12 text-foreground-secondary" />
+        <span className="text-5xl leading-none text-foreground-secondary">梟</span>
       </div>
       <div>
         <p className="font-medium">No manga projects yet</p>
