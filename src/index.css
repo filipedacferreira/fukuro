@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+  --text-2xs: 0.625rem;
+
+  --color-background: light-dark(oklch(100% 0 0), oklch(12% 0 0));
+  --color-background-secondary: light-dark(oklch(96% 0 0), oklch(22% 0 0));
+  --color-foreground: light-dark(oklch(0% 0 0), oklch(95% 0 0));
+  --color-foreground-secondary: light-dark(oklch(65% 0 0), oklch(53% 0 0));
+  --color-accent: var(--color-foreground);
+  --color-accent-foreground: var(--color-background);
+  --color-border: light-dark(oklch(94% 0 0), oklch(26% 0 0));
+  --color-ring: light-dark(
+    color-mix(in oklab, var(--color-accent) 30%, transparent),
+    color-mix(in oklab, var(--color-accent) 30%, transparent)
+  );
+  --color-error: oklch(63.7% 0.237 25.331);
+  --color-warning: oklch(79.5% 0.184 86.047);
+  --color-success: oklch(69.6% 0.17 162.48);
+  --color-info: oklch(62.3% 0.214 259.815);
+
+  --radius: 0.125rem;
+  --radius-bump: 1;
+  --radius-xs: calc(var(--radius) * 1 * var(--radius-bump));
+  --radius-sm: calc(var(--radius) * 2 * var(--radius-bump));
+  --radius-md: calc(var(--radius) * 3 * var(--radius-bump));
+  --radius-lg: calc(var(--radius) * 4 * var(--radius-bump));
+  --radius-xl: calc(var(--radius) * 6 * var(--radius-bump));
+  --radius-2xl: calc(var(--radius) * 8 * var(--radius-bump));
+  --radius-3xl: calc(var(--radius) * 12 * var(--radius-bump));
+  --radius-4xl: calc(var(--radius) * 16 * var(--radius-bump));
+  --inset: calc(var(--radius) * 1.5 * var(--radius-bump));
+  --ring-width: 4px;
+  --corner-shape: squircle;
+
+  --shadow-*: initial;
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.03);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.02), 0 2px 4px oklch(0 0 0 / 0.02);
+  --shadow-md: 0 2px 3px oklch(0 0 0 / 0.02), 0 3px 6px oklch(0 0 0 / 0.02);
+  --shadow-lg: 0 2px 4px oklch(0 0 0 / 0.02), 0 4px 8px oklch(0 0 0 / 0.02), 0 8px 16px oklch(0 0 0 / 0.02);
+
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+
+  --animate-spinner-dot: spinner-dot 1.4s ease-in-out infinite both;
+  --animate-spinner-bar: spinner-bar 1.2s ease-in-out infinite both;
+
+  @keyframes spinner-dot {
+    0%, 80%, 100% { opacity: 0.25; }
+    40% { opacity: 1; }
+  }
+
+  @keyframes spinner-bar {
+    0%, 40%, 100% { transform: scaleY(0.4); }
+    20% { transform: scaleY(1); }
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body { color-scheme: dark; }
+}
+
+@utility mix-with-* {
+  --color-mix-with: --value(--color-*, [*]);
+}
+
+@utility border-mix-* {
+  border-color: color-mix(
+    in oklab,
+    --value(--color-*, [*]),
+    var(--color-mix-with, var(--color-foreground)) calc(--modifier(integer) * 1%)
+  );
+}
+
+@utility bg-mix-* {
+  background-color: color-mix(
+    in oklab,
+    --value(--color-*, [*]),
+    var(--color-mix-with, var(--color-foreground)) calc(--modifier(integer) * 1%)
+  );
+}
+
+* { corner-shape: var(--corner-shape); }
+.rounded-full { corner-shape: round; }
+
+@supports (corner-shape: squircle) {
+  :root { --radius-bump: 1.6; }
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+body:has(dialog[open]) {
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
