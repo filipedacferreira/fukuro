@@ -79,6 +79,10 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + DB cleanup |
 | `create_cbz(projectId, outputPath)` | Zip all non-excluded images in chapter/page order |
 
+## Git commits
+
+Format: `feat(context): message` — one line, no description, no co-authoring.
+
 ## Development
 
 Requires Rust (via rustup) and Node.js.
