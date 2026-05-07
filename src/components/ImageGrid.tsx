@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { Channel, convertFileSrc } from '@tauri-apps/api/core'
 import { Trash2, EyeOff } from 'lucide-react'
 import { Button } from '@/foundations/ui/button/button'
 import { Dialog } from '@/foundations/ui/dialog/dialog'
 import { Skeleton } from '@/foundations/ui/skeleton/skeleton'
+import { Spinner } from '@/foundations/ui/spinner/spinner'
 import { toast } from '@/foundations/ui/toaster/toaster'
 import { cn } from '@/lib/utils/classnames'
 import { api } from '@/lib/tauri'
-import type { ImageMeta } from '@/types'
+import type { ImageMeta, ThumbnailUpdate } from '@/types'
 
 interface ImageGridProps {
   chapterId: string
@@ -21,10 +22,35 @@ export function ImageGrid({ chapterId, onExclusionChange, onImageDeleted }: Imag
 
   useEffect(() => {
     setLoading(true)
+    let active = true
+
     api.getChapterImages(chapterId)
-      .then(setImages)
+      .then((imgs) => {
+        if (!active) return
+        setImages(imgs)
+
+        const needsThumbnails = imgs.some((img) => img.thumbnailPath === img.path)
+        if (!needsThumbnails) return
+
+        const channel = new Channel<ThumbnailUpdate>()
+        channel.onmessage = (update) => {
+          if (!active) return
+          setImages((prev) =>
+            prev.map((img) =>
+              img.path === update.imagePath ? { ...img, thumbnailPath: update.thumbnailPath } : img
+            )
+          )
+        }
+        api.generateChapterThumbnailsStream(chapterId, channel).catch(() => {})
+      })
       .catch((e) => toast({ title: 'Failed to load images', description: String(e), variant: 'negative' }))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
   }, [chapterId])
 
   const handleToggle = async (image: ImageMeta) => {
@@ -99,7 +125,8 @@ interface ImageCardProps {
 }
 
 function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
-  const src = convertFileSrc(image.path)
+  const src = convertFileSrc(image.thumbnailPath)
+  const optimizing = image.thumbnailPath === image.path
 
   return (
     <div className="group relative">
@@ -115,9 +142,14 @@ function ImageCard({ image, onToggle, onDelete }: ImageCardProps) {
         <img
           src={src}
           alt={image.filename}
-          className="aspect-[2/3] w-full object-cover"
+          className={cn('aspect-[2/3] w-full object-cover transition-[filter] duration-300', optimizing && 'blur-sm')}
           loading="lazy"
         />
+        {optimizing && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Spinner className="size-4 text-foreground-secondary" />
+          </div>
+        )}
         {image.isExcluded && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60">
             <EyeOff className="size-6 text-foreground-secondary" />

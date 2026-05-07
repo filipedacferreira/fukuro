@@ -18,6 +18,12 @@ export interface Chapter {
 
 export interface ImageMeta {
   path: string
+  thumbnailPath: string
   filename: string
   isExcluded: boolean
+}
+
+export interface ThumbnailUpdate {
+  imagePath: string
+  thumbnailPath: string
 }

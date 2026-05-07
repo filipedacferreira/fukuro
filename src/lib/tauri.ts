@@ -1,5 +1,5 @@
-import { invoke } from '@tauri-apps/api/core'
-import type { Chapter, ImageMeta, Project } from '@/types'
+import { Channel, invoke } from '@tauri-apps/api/core'
+import type { Chapter, ImageMeta, Project, ThumbnailUpdate } from '@/types'
 
 export const api = {
   createProject: (rootPath: string) =>
@@ -22,6 +22,12 @@ export const api = {
 
   getChapterImages: (chapterId: string) =>
     invoke<ImageMeta[]>('get_chapter_images', { chapterId }),
+
+  generateChapterThumbnailsStream: (chapterId: string, onEvent: Channel<ThumbnailUpdate>) =>
+    invoke<void>('generate_chapter_thumbnails_stream', { chapterId, onEvent }),
+
+  clearThumbnailCache: () =>
+    invoke<void>('clear_thumbnail_cache'),
 
   toggleExclusion: (chapterId: string, imagePath: string) =>
     invoke<boolean>('toggle_exclusion', { chapterId, imagePath }),
