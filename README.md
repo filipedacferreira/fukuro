@@ -52,6 +52,10 @@ Produces a native binary for the current platform. For a Windows `.exe` / `.msi`
 - **macOS** — [Yacreader](https://www.yacreader.com) (`brew install --cask yacreader`)
 - **Windows** — [CDisplayEx](https://www.cdisplayex.com)
 
+## Roadmap
+
+See [`docs/roadmap.md`](docs/roadmap.md) for planned features.
+
 ## License
 
 [GPL-3.0](LICENSE)
