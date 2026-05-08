@@ -23,7 +23,7 @@ Manga chapters arrive as folders of numbered images with inconsistent names and 
 - [Significa Foundations](https://foundations.significa.co) — component library
 - SQLite (`rusqlite`) — local persistence
 - `zip` crate — CBZ creation
-- `@dnd-kit` — drag-and-drop reordering
+- `motion/react` — drag-and-drop reordering
 
 ## Development
 
@@ -36,13 +36,13 @@ Manga chapters arrive as folders of numbered images with inconsistent names and 
 
 ```bash
 npm install
-npm run tauri dev
+npm run dev
 ```
 
 ### Build
 
 ```bash
-npm run tauri build
+npm run build
 ```
 
 Produces a native binary for the current platform. For a Windows `.exe` / `.msi` build from macOS, use a Windows CI runner.
