@@ -1,4 +1,5 @@
 import { save } from '@tauri-apps/plugin-dialog'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Archive } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
@@ -26,10 +27,14 @@ export const ExportPanel: FC<ExportPanelProps> = ({
 
     setExporting(true)
     try {
-      const result = await api.createCbz(projectId, outputPath as string)
+      await api.createCbz(projectId, outputPath as string)
       toast({
         title: 'CBZ created',
-        description: result,
+        description: outputPath as string,
+        action: {
+          label: 'Show in folder',
+          onClick: () => revealItemInDir(outputPath as string),
+        },
       })
     } catch (e) {
       toast({

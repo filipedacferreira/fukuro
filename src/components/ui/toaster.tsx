@@ -16,6 +16,7 @@ type Toast = {
   description?: string
   duration?: number
   variant?: ToastVariant
+  action?: { label: string; onClick: () => void }
 }
 
 type ToastStore = {
@@ -175,7 +176,7 @@ const Toaster = ({ className }: { className?: string }) => {
 type ToasterItemProps = { toast: Toast; onDismiss: () => void }
 
 const ToasterItem = ({ toast: t, onDismiss }: ToasterItemProps) => {
-  const { title, description, variant = 'default' } = t
+  const { title, description, variant = 'default', action } = t
   const reduceMotion = useReducedMotion()
 
   const Icon = { default: null, positive: CheckCircle, negative: XCircle }[
@@ -205,6 +206,15 @@ const ToasterItem = ({ toast: t, onDismiss }: ToasterItemProps) => {
         <p className="font-medium">{title}</p>
         {description && (
           <p className="mt-0.5 text-pretty text-xs opacity-70">{description}</p>
+        )}
+        {action && (
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="mt-1 cursor-pointer text-xs underline opacity-70 hover:opacity-100"
+          >
+            {action.label}
+          </button>
         )}
       </div>
       <ToastCloseButton onClick={onDismiss} />
