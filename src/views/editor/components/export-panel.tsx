@@ -30,13 +30,11 @@ export const ExportPanel: FC<ExportPanelProps> = ({
       toast({
         title: 'CBZ created',
         description: result,
-        variant: 'positive',
       })
     } catch (e) {
       toast({
         title: 'Export failed',
         description: String(e),
-        variant: 'negative',
       })
     } finally {
       setExporting(false)

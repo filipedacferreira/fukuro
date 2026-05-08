@@ -28,7 +28,6 @@ export const Editor: FC<EditorProps> = ({ projectId, projectName, onBack }) => {
         toast({
           title: 'Failed to load chapters',
           description: String(e),
-          variant: 'negative',
         }),
       )
       .finally(() => setLoading(false))
@@ -42,7 +41,6 @@ export const Editor: FC<EditorProps> = ({ projectId, projectName, onBack }) => {
       toast({
         title: 'Failed to save order',
         description: String(e),
-        variant: 'negative',
       })
     }
   }
