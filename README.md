@@ -29,20 +29,21 @@ Manga chapters arrive as folders of numbered images with inconsistent names and 
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org) 20+
+- [Node.js](https://nodejs.org) 22+
+- [pnpm](https://pnpm.io) 10+
 - [Rust](https://www.rust-lang.org/learn/get-started) (via rustup)
 
 ### Setup
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 ### Build
 
 ```bash
-npm run build
+pnpm build
 ```
 
 Produces a native binary for the current platform. For a Windows `.exe` / `.msi` build from macOS, use a Windows CI runner.

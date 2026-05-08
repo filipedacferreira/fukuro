@@ -142,9 +142,9 @@ Format: `feat(context): message` — one line, no description, no co-authoring.
 Requires Rust (via rustup) and Node.js.
 
 ```bash
-npm install
-npm run dev      # hot-reload dev server (tauri dev)
-npm run build    # production build (tauri build)
+pnpm install
+pnpm dev         # hot-reload dev server (tauri dev)
+pnpm build       # production build (tauri build)
 ```
 
 ## Component conventions
