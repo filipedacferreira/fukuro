@@ -146,7 +146,7 @@ const Toaster = ({ className }: { className?: string }) => {
       ref={composeRefs(elementRef, topLayerRef)}
       data-toaster-provider
       className={cn(
-        'fixed flex size-full flex-col items-end justify-end overflow-hidden bg-transparent px-4 py-3',
+        'fixed flex size-full flex-col items-center justify-start overflow-hidden bg-transparent px-4 py-3',
         'pointer-events-none',
         className,
       )}
