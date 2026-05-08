@@ -246,14 +246,9 @@ const ProjectRow: FC<ProjectRowProps> = ({
             </>
           )}
         </div>
-        <Tooltip placement="bottom-start">
-          <Tooltip.Trigger asChild>
-            <span className="max-w-[500px] cursor-default truncate text-foreground-secondary text-xs">
-              {project.rootPath}
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>{project.rootPath}</Tooltip.Content>
-        </Tooltip>
+        <span className="max-w-[500px] truncate text-foreground-secondary text-xs">
+          {project.rootPath}
+        </span>
         <span className="text-foreground-secondary text-xs">
           {project.chapterCount}{' '}
           {project.chapterCount === 1 ? 'chapter' : 'chapters'} · {date}
