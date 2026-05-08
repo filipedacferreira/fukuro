@@ -6,6 +6,7 @@ import { Button, IconButton } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
+import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/tauri'
 import type { Project } from '@/types'
 
@@ -225,24 +226,34 @@ const ProjectRow: FC<ProjectRowProps> = ({
           ) : (
             <>
               <span className="truncate font-medium">{localName}</span>
-              <button
-                type="button"
-                aria-label="Rename project"
-                className="focus-visible:ring-(length:--ring-width) -m-1 shrink-0 cursor-pointer rounded p-1 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70 group-hover:opacity-100"
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  startRenaming()
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </button>
+              <Tooltip>
+                <Tooltip.Trigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Rename project"
+                    className="focus-visible:ring-(length:--ring-width) -m-1 shrink-0 cursor-pointer rounded p-1 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      startRenaming()
+                    }}
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                </Tooltip.Trigger>
+                <Tooltip.Content>Rename</Tooltip.Content>
+              </Tooltip>
             </>
           )}
         </div>
-        <span className="max-w-[500px] truncate text-foreground-secondary text-xs">
-          {project.rootPath}
-        </span>
+        <Tooltip placement="bottom-start">
+          <Tooltip.Trigger asChild>
+            <span className="max-w-[500px] cursor-default truncate text-foreground-secondary text-xs">
+              {project.rootPath}
+            </span>
+          </Tooltip.Trigger>
+          <Tooltip.Content>{project.rootPath}</Tooltip.Content>
+        </Tooltip>
         <span className="text-foreground-secondary text-xs">
           {project.chapterCount}{' '}
           {project.chapterCount === 1 ? 'chapter' : 'chapters'} · {date}
@@ -251,19 +262,23 @@ const ProjectRow: FC<ProjectRowProps> = ({
 
       <div className="absolute top-1/2 right-3 -translate-y-1/2">
         <Dialog>
-          <Dialog.Trigger asChild>
-            <IconButton
-              variant="ghost"
-              size="sm"
-              aria-label="Delete project"
-              title="Delete project"
-              className="opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
-            >
-              <Trash2 className="size-4" />
-            </IconButton>
-          </Dialog.Trigger>
+          <Tooltip>
+            <Dialog.Trigger asChild>
+              <Tooltip.Trigger asChild>
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Delete project"
+                  className="opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 className="size-4" />
+                </IconButton>
+              </Tooltip.Trigger>
+            </Dialog.Trigger>
+            <Tooltip.Content>Delete</Tooltip.Content>
+          </Tooltip>
           <Dialog.Content className="w-80">
-            <Dialog.Title>Delete project?</Dialog.Title>
+            <Dialog.Title>Delete &ldquo;{localName}&rdquo;?</Dialog.Title>
             <Dialog.Description>
               This removes the project from fukuro. Your manga files won't be
               deleted.
