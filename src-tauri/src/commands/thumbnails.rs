@@ -5,7 +5,7 @@ use std::path::Path;
 use tauri::Manager;
 
 use crate::db::DbState;
-use crate::utils::{is_image_file, natural_sort_key};
+use crate::utils::{is_image_file, natural_sort_key, normalize_path};
 
 // Emitted through the Tauri Channel during thumbnail generation.
 // The frontend receives these one by one and swaps each image's src.
@@ -133,7 +133,7 @@ pub fn generate_chapter_thumbnails_stream(
         // par_iter() from rayon: runs the closure on all images in parallel,
         // distributing work across all CPU cores automatically.
         images.par_iter().for_each(|entry| {
-            let path = entry.path().to_string_lossy().replace('\\', "/");
+            let path = normalize_path(&entry.path());
             let filename = entry.file_name().to_string_lossy().to_string();
             let stem = Path::new(&filename)
                 .file_stem()
@@ -144,7 +144,7 @@ pub fn generate_chapter_thumbnails_stream(
 
             // ensure_thumbnail skips images that already have a cached thumbnail.
             if ensure_thumbnail(Path::new(&path), &thumb).is_ok() {
-                let thumbnail_path = thumb.to_string_lossy().replace('\\', "/");
+                let thumbnail_path = normalize_path(&thumb);
                 // Send the update through the Channel — the frontend receives it
                 // immediately and swaps out the blurred image for the sharp thumbnail.
                 let _ = on_event.send(ThumbnailUpdate { image_path: path, thumbnail_path });

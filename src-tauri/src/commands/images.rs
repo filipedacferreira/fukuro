@@ -5,7 +5,7 @@ use std::path::Path;
 use tauri::Manager;
 
 use crate::db::DbState;
-use crate::utils::{is_image_file, natural_sort_key};
+use crate::utils::{is_image_file, natural_sort_key, normalize_path};
 
 // Returned by get_chapter_images for each image file found in a chapter folder.
 // Both `path` and `thumbnail_path` are absolute filesystem paths.
@@ -50,7 +50,7 @@ pub fn get_chapter_images(
                 .query_map(params![chapter_id], |row| row.get::<_, String>(0))
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
-                .map(|p| p.replace('\\', "/"))
+                .map(|p: String| normalize_path(Path::new(&p)))
                 .collect();
             result
         };
@@ -75,7 +75,7 @@ pub fn get_chapter_images(
                 && is_image_file(e.path().as_path())
         })
         .map(|e| {
-            let path = e.path().to_string_lossy().replace('\\', "/");
+            let path = normalize_path(&e.path());
             let filename = e.file_name().to_string_lossy().to_string();
             let is_excluded = excluded.contains(&path);
 
@@ -91,7 +91,7 @@ pub fn get_chapter_images(
             // If the thumbnail exists, return its path. Otherwise fall back to the original
             // so the frontend can show a blurred preview while generation runs.
             let thumbnail_path = if thumb.exists() {
-                thumb.to_string_lossy().replace('\\', "/")
+                normalize_path(&thumb)
             } else {
                 path.clone()
             };

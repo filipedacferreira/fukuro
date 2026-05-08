@@ -193,7 +193,7 @@ IPC thread        → command returns immediately
 ## `Path` vs `String` — two ways to handle file paths
 
 ```rust
-let path = entry.path().to_string_lossy().replace('\\', "/");
+let path = normalize_path(&entry.path());
 let stem = Path::new(&filename).file_stem().unwrap_or_default().to_string_lossy().into_owned();
 ```
 
@@ -202,7 +202,8 @@ let stem = Path::new(&filename).file_stem().unwrap_or_default().to_string_lossy(
 - `entry.path()` → `PathBuf` (owned path)
 - `.to_string_lossy()` → `Cow<str>` (a string-like that might borrow or own)
 - `.into_owned()` → `String` (forces an owned `String`)
-- `.replace('\\', "/")` → normalise Windows backslashes to forward slashes for consistency
+
+`normalize_path` (in `utils.rs`) converts any path to a forward-slash string — needed because Windows uses backslashes natively but paths are stored in the DB with forward slashes. Always use `normalize_path` when turning a `Path` into a `String` for storage or comparison; never call `.replace('\\', "/")` inline.
 
 `Path::new(&filename).file_stem()` extracts `"001"` from `"001.jpg"`. `.unwrap_or_default()` returns an empty string if there's no stem rather than panicking.
 

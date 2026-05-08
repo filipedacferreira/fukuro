@@ -1,5 +1,10 @@
 use std::path::Path;
 
+// Converts a filesystem path to a forward-slash string for consistent cross-platform storage.
+pub fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 // Returns true for file extensions the image crate can decode.
 // Shared across images.rs, thumbnails.rs, projects.rs, and export.rs.
 pub fn is_image_file(path: &Path) -> bool {

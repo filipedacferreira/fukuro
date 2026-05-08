@@ -5,7 +5,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::db::DbState;
-use crate::utils::is_image_file;
+use crate::utils::{is_image_file, normalize_path};
 
 // These structs are returned from commands. `Serialize` lets serde convert them to JSON
 // so Tauri can send them to the frontend. `rename_all = "camelCase"` means `root_path`
@@ -97,7 +97,7 @@ pub fn create_project(
     // Insert one chapter row per subdirectory.
     for (i, entry) in entries.iter().enumerate() {
         // Normalise to forward slashes so paths are consistent across Windows and macOS.
-        let folder_path = entry.path().to_string_lossy().replace('\\', "/");
+        let folder_path = normalize_path(&entry.path());
         let display_name = entry.file_name().to_string_lossy().to_string();
         let chapter_id = Uuid::new_v4().to_string();
         let image_count = count_images_in_dir(&entry.path());
@@ -216,7 +216,7 @@ pub fn get_project_chapters(
             .query_map(params![project_id], |r| r.get::<_, String>(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
-            .map(|p| p.replace('\\', "/"))
+            .map(|p: String| normalize_path(Path::new(&p)))
             .collect();
         result
     };
@@ -227,8 +227,7 @@ pub fn get_project_chapters(
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .filter(|e| {
-            let p = e.path().to_string_lossy().replace('\\', "/");
-            !existing.contains(&p) // keep only folders not already in the DB
+            !existing.contains(&normalize_path(&e.path())) // keep only folders not already in the DB
         })
         .collect();
     new_dirs.sort_by_key(|e| e.file_name());
@@ -245,7 +244,7 @@ pub fn get_project_chapters(
             .unwrap_or(-1);
 
         for (i, entry) in new_dirs.iter().enumerate() {
-            let folder_path = entry.path().to_string_lossy().replace('\\', "/");
+            let folder_path = normalize_path(&entry.path());
             let display_name = entry.file_name().to_string_lossy().to_string();
             let chapter_id = Uuid::new_v4().to_string();
             let image_count = count_images_in_dir(&entry.path());

@@ -2,7 +2,7 @@ use rusqlite::params;
 use std::collections::HashSet;
 use std::io::Write;
 
-use crate::utils::{is_image_file, natural_sort_key};
+use crate::utils::{is_image_file, natural_sort_key, normalize_path};
 use crate::db::DbState;
 
 // Produces a .cbz file from all non-excluded images across all chapters, in sort order.
@@ -54,6 +54,7 @@ pub fn create_cbz(
                     stmt.query_map(params![chapter_id], |row| row.get(0))
                         .unwrap()
                         .filter_map(|r| r.ok())
+                        .map(|p: String| normalize_path(std::path::Path::new(&p)))
                         .collect()
                 };
                 (folder_path, excluded)
@@ -86,7 +87,7 @@ pub fn create_cbz(
             .filter(|e| {
                 e.file_type().map(|t| t.is_file()).unwrap_or(false)
                     && is_image_file(e.path().as_path())
-                    && !excluded.contains(&e.path().to_string_lossy().to_string())
+                    && !excluded.contains(&normalize_path(&e.path()))
             })
             .map(|e| e.path())
             .collect();
