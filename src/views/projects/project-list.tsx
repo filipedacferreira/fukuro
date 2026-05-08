@@ -26,7 +26,6 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         toast({
           title: 'Failed to load projects',
           description: String(e),
-          variant: 'negative',
         }),
       )
       .finally(() => setLoading(false))
@@ -48,7 +47,6 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
       toast({
         title: 'Failed to open folder',
         description: String(e),
-        variant: 'negative',
       })
     } finally {
       setOpening(false)
@@ -65,7 +63,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
     try {
       await api.deleteProject(id)
       setProjects((prev) => prev.filter((p) => p.id !== id))
-      toast({ title: 'Project deleted', variant: 'default' })
+      toast({ title: 'Project deleted' })
     } catch (e) {
       toast({
         title: 'Failed to delete project',
@@ -77,7 +75,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-border border-b px-6 py-4">
+      <header className="flex items-center justify-between border-border border-b px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-base leading-none">梟</span>
           <h1 className="font-semibold text-base">Fukurō</h1>
@@ -88,7 +86,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         </Button>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-6 py-6">
+      <main className="flex-1 overflow-y-auto p-4">
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -184,7 +182,6 @@ const ProjectRow: FC<ProjectRowProps> = ({
         toast({
           title: 'Failed to rename project',
           description: String(e),
-          variant: 'negative',
         })
       }
     }
@@ -205,7 +202,7 @@ const ProjectRow: FC<ProjectRowProps> = ({
     <li className="group relative rounded-xl border border-border bg-background transition hover:bg-background-secondary active:bg-foreground/5">
       <button
         type="button"
-        className="focus-visible:ring-(length:--ring-width) flex w-full flex-col gap-0.5 rounded-xl px-4 py-3 text-left ring-ring transition focus-visible:outline-none"
+        className="focus-visible:ring-(length:--ring-width) flex w-full flex-col gap-0.5 rounded-xl px-4 py-3 text-left outline-none ring-ring transition focus-visible:ring-inset"
         style={{ cursor: isRenaming ? 'default' : 'pointer' }}
         onClick={() => {
           if (!isRenaming) onOpen()
@@ -215,7 +212,7 @@ const ProjectRow: FC<ProjectRowProps> = ({
           {isRenaming ? (
             <input
               ref={inputRef}
-              className="focus-visible:ring-(length:--ring-width) min-w-0 flex-1 rounded bg-transparent font-medium text-foreground outline-none ring-ring transition"
+              className="min-w-0 flex-1 rounded bg-transparent font-medium text-foreground outline-none transition"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commitRename}
