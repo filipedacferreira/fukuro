@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "io.fukuro",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "pnpm vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "pnpm vite build",
     "frontendDist": "../dist"
   },
   "app": {
