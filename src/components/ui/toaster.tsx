@@ -211,7 +211,7 @@ const ToasterItem = ({ toast: t, onDismiss }: ToasterItemProps) => {
           <button
             type="button"
             onClick={action.onClick}
-            className="mt-1 cursor-pointer text-xs underline opacity-70 hover:opacity-100"
+            className="mt-1 cursor-pointer text-xs underline opacity-70 transition-opacity hover:opacity-100"
           >
             {action.label}
           </button>
