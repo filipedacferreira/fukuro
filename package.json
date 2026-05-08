@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "format": "biome format --write",
+    "lint": "biome lint",
+    "check": "biome check"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
@@ -22,6 +25,7 @@
     "tailwind-merge": "^3.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
     "@tailwindcss/vite": "^4.1.7",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",

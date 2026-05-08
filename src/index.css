@@ -1,22 +1,31 @@
 @import "tailwindcss";
 
 @theme {
-  --font-body: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Space Mono', ui-monospace, Menlo, monospace;
+  --font-body: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, Menlo, monospace;
   --text-2xs: 0.625rem;
 
   --color-background: light-dark(oklch(96% 0.01 290), oklch(25% 0.03 285));
-  --color-background-secondary: light-dark(oklch(92% 0.02 290), oklch(31% 0.03 285));
+  --color-background-secondary: light-dark(
+    oklch(92% 0.02 290),
+    oklch(31% 0.03 285)
+  );
   --color-foreground: light-dark(oklch(28% 0.05 290), oklch(92% 0.015 290));
-  --color-foreground-secondary: light-dark(oklch(50% 0.04 290), oklch(72% 0.03 290));
-  --color-accent: light-dark(oklch(56% 0.20 295), oklch(74% 0.16 295));
-  --color-accent-foreground: light-dark(oklch(96% 0.01 290), oklch(25% 0.03 285));
+  --color-foreground-secondary: light-dark(
+    oklch(50% 0.04 290),
+    oklch(72% 0.03 290)
+  );
+  --color-accent: light-dark(oklch(56% 0.2 295), oklch(74% 0.16 295));
+  --color-accent-foreground: light-dark(
+    oklch(96% 0.01 290),
+    oklch(25% 0.03 285)
+  );
   --color-border: light-dark(oklch(86% 0.02 290), oklch(38% 0.03 285));
   --color-ring: light-dark(
     color-mix(in oklab, var(--color-accent) 30%, transparent),
     color-mix(in oklab, var(--color-accent) 30%, transparent)
   );
-  --color-error: light-dark(oklch(63% 0.20 12), oklch(72% 0.19 12));
+  --color-error: light-dark(oklch(63% 0.2 12), oklch(72% 0.19 12));
   --color-warning: light-dark(oklch(78% 0.16 80), oklch(86% 0.15 80));
   --color-success: light-dark(oklch(70% 0.18 145), oklch(80% 0.18 145));
   --color-info: light-dark(oklch(72% 0.13 220), oklch(82% 0.12 220));
@@ -39,7 +48,9 @@
   --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.03);
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.02), 0 2px 4px oklch(0 0 0 / 0.02);
   --shadow-md: 0 2px 3px oklch(0 0 0 / 0.02), 0 3px 6px oklch(0 0 0 / 0.02);
-  --shadow-lg: 0 2px 4px oklch(0 0 0 / 0.02), 0 4px 8px oklch(0 0 0 / 0.02), 0 8px 16px oklch(0 0 0 / 0.02);
+  --shadow-lg:
+    0 2px 4px oklch(0 0 0 / 0.02), 0 4px 8px oklch(0 0 0 / 0.02),
+    0 8px 16px oklch(0 0 0 / 0.02);
 
   --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
   --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
@@ -48,18 +59,32 @@
   --animate-spinner-bar: spinner-bar 1.2s ease-in-out infinite both;
 
   @keyframes spinner-dot {
-    0%, 80%, 100% { opacity: 0.25; }
-    40% { opacity: 1; }
+    0%,
+    80%,
+    100% {
+      opacity: 0.25;
+    }
+    40% {
+      opacity: 1;
+    }
   }
 
   @keyframes spinner-bar {
-    0%, 40%, 100% { transform: scaleY(0.4); }
-    20% { transform: scaleY(1); }
+    0%,
+    40%,
+    100% {
+      transform: scaleY(0.4);
+    }
+    20% {
+      transform: scaleY(1);
+    }
   }
 }
 
 @media (prefers-color-scheme: dark) {
-  body { color-scheme: dark; }
+  body {
+    color-scheme: dark;
+  }
 }
 
 @utility mix-with-* {
@@ -70,7 +95,8 @@
   border-color: color-mix(
     in oklab,
     --value(--color-*, [*]),
-    var(--color-mix-with, var(--color-foreground)) calc(--modifier(integer) * 1%)
+    var(--color-mix-with, var(--color-foreground))
+      calc(--modifier(integer) * 1%)
   );
 }
 
@@ -78,18 +104,27 @@
   background-color: color-mix(
     in oklab,
     --value(--color-*, [*]),
-    var(--color-mix-with, var(--color-foreground)) calc(--modifier(integer) * 1%)
+    var(--color-mix-with, var(--color-foreground))
+      calc(--modifier(integer) * 1%)
   );
 }
 
-* { corner-shape: var(--corner-shape); }
-.rounded-full { corner-shape: round; }
-
-@supports (corner-shape: squircle) {
-  :root { --radius-bump: 1.6; }
+* {
+  corner-shape: var(--corner-shape);
+}
+.rounded-full {
+  corner-shape: round;
 }
 
-html, body, #root {
+@supports (corner-shape: squircle) {
+  :root {
+    --radius-bump: 1.6;
+  }
+}
+
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
 }

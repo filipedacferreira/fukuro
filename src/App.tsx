@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Toaster } from '@/foundations/ui/toaster/toaster'
-import { ProjectList } from '@/components/ProjectList'
-import { Editor } from '@/components/Editor'
+import { Toaster } from '@/components/ui/toaster'
+import { Editor } from '@/views/editor/editor'
+import { ProjectList } from '@/views/projects/project-list'
 
 type View =
   | { type: 'projects' }

@@ -15,8 +15,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Resolve the platform-specific app data directory:
-            // macOS → ~/Library/Application Support/co.significa.fukuro/
-            // Windows → %APPDATA%\co.significa.fukuro\
+            // macOS → ~/Library/Application Support/io.fukuro/
+            // Windows → %APPDATA%\io.fukuro\
             let app_dir = app
                 .path()
                 .app_data_dir()

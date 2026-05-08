@@ -53,8 +53,8 @@ State is persisted to a local SQLite database rather than using ephemeral in-mem
 - A single Mutex-wrapped `rusqlite::Connection` is managed as Tauri app state, giving all Rust commands shared access without complexity
 
 The DB file lives at `{AppData}/fukuro.db`:
-- macOS: `~/Library/Application Support/co.significa.fukuro/fukuro.db`
-- Windows: `%APPDATA%\co.significa.fukuro\fukuro.db`
+- macOS: `~/Library/Application Support/io.fukuro/fukuro.db`
+- Windows: `%APPDATA%\io.fukuro\fukuro.db`
 
 WAL mode and foreign key enforcement are enabled on every connection.
 

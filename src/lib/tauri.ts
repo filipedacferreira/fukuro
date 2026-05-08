@@ -1,15 +1,13 @@
-import { Channel, invoke } from '@tauri-apps/api/core'
+import { type Channel, invoke } from '@tauri-apps/api/core'
 import type { Chapter, ImageMeta, Project, ThumbnailUpdate } from '@/types'
 
 export const api = {
   createProject: (rootPath: string) =>
     invoke<Project>('create_project', { rootPath }),
 
-  listProjects: () =>
-    invoke<Project[]>('list_projects'),
+  listProjects: () => invoke<Project[]>('list_projects'),
 
-  deleteProject: (id: string) =>
-    invoke<void>('delete_project', { id }),
+  deleteProject: (id: string) => invoke<void>('delete_project', { id }),
 
   renameProject: (id: string, name: string) =>
     invoke<void>('rename_project', { id, name }),
@@ -26,11 +24,13 @@ export const api = {
   getChapterImages: (chapterId: string) =>
     invoke<ImageMeta[]>('get_chapter_images', { chapterId }),
 
-  generateChapterThumbnailsStream: (chapterId: string, onEvent: Channel<ThumbnailUpdate>) =>
+  generateChapterThumbnailsStream: (
+    chapterId: string,
+    onEvent: Channel<ThumbnailUpdate>,
+  ) =>
     invoke<void>('generate_chapter_thumbnails_stream', { chapterId, onEvent }),
 
-  clearThumbnailCache: () =>
-    invoke<void>('clear_thumbnail_cache'),
+  clearThumbnailCache: () => invoke<void>('clear_thumbnail_cache'),
 
   toggleExclusion: (chapterId: string, imagePath: string) =>
     invoke<boolean>('toggle_exclusion', { chapterId, imagePath }),
