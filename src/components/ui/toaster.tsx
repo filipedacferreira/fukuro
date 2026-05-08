@@ -232,7 +232,7 @@ const ToastCloseButton = ({
     className={cn(
       'relative mb-auto flex size-6 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-sm border-inherit bg-inherit',
       'focus-visible:ring-(length:--ring-width) ring-ring focus-visible:outline-none',
-      'after:absolute after:inset-0 after:bg-current after:opacity-0 hover:after:opacity-4 active:after:opacity-8',
+      'after:absolute after:inset-0 after:bg-current after:opacity-0 after:transition-opacity hover:after:opacity-4 active:after:opacity-8',
     )}
   >
     <X className="size-3 opacity-50" />
