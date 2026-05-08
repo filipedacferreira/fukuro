@@ -143,8 +143,8 @@ Requires Rust (via rustup) and Node.js.
 
 ```bash
 npm install
-npm run tauri dev     # hot-reload dev server
-npm run tauri build   # production build
+npm run dev      # hot-reload dev server (tauri dev)
+npm run build    # production build (tauri build)
 ```
 
 ## Component conventions
