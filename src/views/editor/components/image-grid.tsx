@@ -159,12 +159,13 @@ const ImageCard: FC<ImageCardProps> = ({ image, onToggle, onDelete }) => {
 
   return (
     <div>
-      <div className="group/card relative">
+      <div className="group/card relative transition-transform duration-150 has-[[data-image-toggle]:active]:scale-[0.98]">
         <button
           type="button"
+          data-image-toggle
           className={cn(
             'relative block w-full cursor-pointer overflow-hidden rounded-lg border border-border',
-            'focus-visible:ring-(length:--ring-width) ring-ring transition-all duration-150 hover:border-foreground/30 focus-visible:outline-none active:scale-[0.98]',
+            'focus-visible:ring-(length:--ring-width) ring-ring transition-[border-color] duration-150 hover:border-foreground/30 focus-visible:outline-none',
             image.isExcluded && 'opacity-40 grayscale',
           )}
           onClick={onToggle}
