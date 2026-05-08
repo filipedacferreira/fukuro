@@ -29,7 +29,7 @@ export const ChapterList: FC<ChapterListProps> = ({
       axis="y"
       values={chapters}
       onReorder={onReorder}
-      className="flex flex-col gap-2 p-4"
+      className="isolate flex flex-col gap-2 p-4"
     >
       {chapters.map((chapter, index) => (
         <ChapterItem
