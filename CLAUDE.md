@@ -199,6 +199,32 @@ Ensures correct display order in all CBZ readers.
 
 Images within each chapter folder are sorted with a natural sort algorithm (1, 2, 10 — not 1, 10, 2). Implemented in `commands/images.rs:natural_sort_key`.
 
-## Planned (not built yet)
+## Platform target — Windows first
 
-- Volume grouping (chapters → volumes → project)
+Windows is the primary target platform. macOS is supported but secondary. Every decision must be verified to work correctly on Windows.
+
+### Path handling
+
+Never manipulate file paths as raw strings. Always use Tauri's path APIs, which return and accept native OS paths (backslashes on Windows, forward slashes on macOS/Linux).
+
+- **Obtaining paths** — use `@tauri-apps/plugin-dialog` (`open`, `save`); the returned string is already the correct native path.
+- **Joining / resolving paths** — use `@tauri-apps/api/path` (`join`, `resolve`, `appDataDir`, etc.).
+- **Displaying paths in the UI** — render as-is; do not normalise separators for display.
+- **Image `src` attributes** — convert with `convertFileSrc` from `@tauri-apps/api/core` (produces the correct `asset://` / `https://asset.localhost/` URL per platform).
+- **Rust side** — use `std::path::PathBuf` and `.join()` throughout; never concatenate strings with `/`.
+
+### UI copy
+
+Avoid macOS-specific terms. Use OS-neutral language:
+
+| ❌ Don't use | ✅ Use instead |
+|---|---|
+| Show in Finder | Show in folder |
+| Reveal in Finder | Reveal in folder |
+| Trash | Delete |
+| ⌘ shortcuts in copy | avoid in UI labels |
+
+### Shell / file-manager actions
+
+Use `revealItemInDir` from `@tauri-apps/plugin-opener` to reveal files in the system file manager. It calls Explorer on Windows, Finder on macOS, and the default file manager on Linux. Already bundled — no extra dependency needed.
+
