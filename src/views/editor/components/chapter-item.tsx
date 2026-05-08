@@ -3,6 +3,8 @@ import { Reorder, useDragControls } from 'motion/react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Disclosure } from '@/components/ui/disclosure'
+import { toast } from '@/components/ui/toaster'
+import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/tauri'
 import { cn } from '@/lib/utils/classnames'
 import type { Chapter } from '@/types'
@@ -54,8 +56,13 @@ export const ChapterItem: FC<ChapterItemProps> = ({
   const commitRename = async () => {
     const trimmed = draft.trim()
     if (trimmed && trimmed !== localName) {
-      await api.renameChapter(chapter.id, trimmed)
-      setLocalName(trimmed)
+      try {
+        await api.renameChapter(chapter.id, trimmed)
+        setLocalName(trimmed)
+      } catch (e) {
+        toast({ title: 'Failed to rename chapter', description: String(e) })
+        return
+      }
     }
     setIsRenaming(false)
     setDraft('')
@@ -105,21 +112,26 @@ export const ChapterItem: FC<ChapterItemProps> = ({
               <span className="min-w-0 truncate font-medium text-sm">
                 {localName}
               </span>
-              <button
-                type="button"
-                aria-label="Rename chapter"
-                className={cn(
-                  'focus-visible:ring-(length:--ring-width) pointer-events-auto -m-1.5 shrink-0 cursor-pointer rounded p-1.5 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70',
-                  !dragging && 'group-hover:opacity-100',
-                )}
-                onClick={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  startRenaming()
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </button>
+              <Tooltip>
+                <Tooltip.Trigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Rename chapter"
+                    className={cn(
+                      'focus-visible:ring-(length:--ring-width) pointer-events-auto -m-1.5 shrink-0 cursor-pointer rounded p-1.5 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70',
+                      !dragging && 'group-hover:opacity-100',
+                    )}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      startRenaming()
+                    }}
+                  >
+                    <Pencil className="size-3.5" />
+                  </button>
+                </Tooltip.Trigger>
+                <Tooltip.Content>Rename</Tooltip.Content>
+              </Tooltip>
             </>
           )}
         </div>
