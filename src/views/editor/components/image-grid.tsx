@@ -13,12 +13,14 @@ import type { ImageMeta, ThumbnailUpdate } from '@/types'
 
 interface ImageGridProps {
   chapterId: string
+  imageCount: number
   onExclusionChange: (delta: number) => void
   onImageDeleted: () => void
 }
 
 export const ImageGrid: FC<ImageGridProps> = ({
   chapterId,
+  imageCount,
   onExclusionChange,
   onImageDeleted,
 }) => {
@@ -57,7 +59,6 @@ export const ImageGrid: FC<ImageGridProps> = ({
         toast({
           title: 'Failed to load images',
           description: String(e),
-          variant: 'negative',
         }),
       )
       .finally(() => {
@@ -88,7 +89,6 @@ export const ImageGrid: FC<ImageGridProps> = ({
       toast({
         title: 'Failed to update exclusion',
         description: String(e),
-        variant: 'negative',
       })
     }
   }
@@ -107,7 +107,6 @@ export const ImageGrid: FC<ImageGridProps> = ({
       toast({
         title: 'Failed to delete image',
         description: String(e),
-        variant: 'negative',
       })
     }
   }
@@ -115,9 +114,12 @@ export const ImageGrid: FC<ImageGridProps> = ({
   if (loading) {
     return (
       <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-2">
-        {Array.from({ length: 8 }).map((_, i) => (
+        {Array.from({ length: imageCount }).map((_, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static-length skeleton list
-          <Skeleton key={i} className="aspect-[2/3] rounded-lg" />
+          <div key={i}>
+            <Skeleton className="aspect-[2/3] rounded-lg" />
+            <Skeleton className="mx-auto mt-1 h-3 w-3/4 rounded" />
+          </div>
         ))}
       </div>
     )
