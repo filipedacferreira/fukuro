@@ -25,3 +25,4 @@ uuid = { version = "1", features = ["v4"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 rayon = "1"
 fast_image_resize = "4"
+reqwest = { version = "0.12", features = ["json"] }

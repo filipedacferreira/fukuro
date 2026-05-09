@@ -1,4 +1,5 @@
 pub mod chapters;
+pub mod cover;
 pub mod export;
 pub mod images;
 pub mod projects;

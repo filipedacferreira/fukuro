@@ -107,6 +107,9 @@ pub fn run() {
             commands::images::toggle_exclusion,
             commands::images::hard_delete_image,
             commands::export::create_cbz,
+            commands::cover::set_project_cover,
+            commands::cover::fetch_anilist_cover,
+            commands::cover::remove_project_cover,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
