@@ -137,6 +137,8 @@ The goal is that the developer can read any file in `src-tauri/` and immediately
 
 Format: `feat(context): message` — one line, no description, no co-authoring.
 
+Split changes into multiple logical commits, each covering a single concern (e.g. DB schema, Rust commands, frontend feature, tooling, docs). Never bundle unrelated changes into one commit.
+
 ## Development
 
 Requires Rust (via rustup) and Node.js.
