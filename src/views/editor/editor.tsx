@@ -1,7 +1,9 @@
-import { ArrowLeft } from 'lucide-react'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { ArrowLeft, BookImage } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
+import { CoverDialog } from '@/components/cover-dialog'
 import { IconButton } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
@@ -13,12 +15,20 @@ import { ExportPanel } from './components/export-panel'
 interface EditorProps {
   projectId: string
   projectName: string
+  initialCoverPath: string | null
   onBack: () => void
 }
 
-export const Editor: FC<EditorProps> = ({ projectId, projectName, onBack }) => {
+export const Editor: FC<EditorProps> = ({
+  projectId,
+  projectName,
+  initialCoverPath,
+  onBack,
+}) => {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
+  const [coverPath, setCoverPath] = useState(initialCoverPath)
+  const [coverDialogOpen, setCoverDialogOpen] = useState(false)
 
   useEffect(() => {
     api
@@ -77,8 +87,37 @@ export const Editor: FC<EditorProps> = ({ projectId, projectName, onBack }) => {
         >
           <ArrowLeft className="size-4" />
         </IconButton>
+
+        {/* Compact cover thumbnail — click to open cover dialog */}
+        <button
+          type="button"
+          aria-label="Change cover"
+          className="focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden rounded outline-none ring-ring focus-visible:ring-inset"
+          onClick={() => setCoverDialogOpen(true)}
+        >
+          {coverPath ? (
+            <img
+              src={convertFileSrc(coverPath)}
+              alt="Cover"
+              className="h-8 w-auto rounded object-cover"
+            />
+          ) : (
+            <div className="flex h-8 w-6 items-center justify-center rounded bg-background-secondary">
+              <BookImage className="size-3.5 text-foreground-secondary" />
+            </div>
+          )}
+        </button>
+
         <h1 className="flex-1 truncate font-semibold text-sm">{projectName}</h1>
       </header>
+
+      <CoverDialog
+        projectId={projectId}
+        coverPath={coverPath}
+        open={coverDialogOpen}
+        onOpenChange={setCoverDialogOpen}
+        onCoverChange={setCoverPath}
+      />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <motion.div layoutScroll className="flex-1 overflow-y-auto">

@@ -1,7 +1,12 @@
+import { zodResolver } from '@hookform/resolvers/zod'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderOpen, Pencil, Trash2 } from 'lucide-react'
+import { BookImage, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
+import { CoverDialog } from '@/components/cover-dialog'
 import { Button, IconButton } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -10,8 +15,13 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/tauri'
 import type { Project } from '@/types'
 
+const renameSchema = z.object({
+  name: z.string().trim().min(1, 'Name cannot be empty'),
+})
+type RenameValues = z.infer<typeof renameSchema>
+
 interface ProjectListProps {
-  onOpenProject: (id: string, name: string) => void
+  onOpenProject: (id: string, name: string, coverPath: string | null) => void
 }
 
 export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
@@ -43,7 +53,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
       if (!selected) return
       const project = await api.createProject(selected as string)
       setProjects((prev) => [project, ...prev])
-      onOpenProject(project.id, project.name)
+      onOpenProject(project.id, project.name, project.coverPath)
     } catch (e) {
       toast({
         title: 'Failed to open folder',
@@ -103,7 +113,9 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
               <ProjectRow
                 key={project.id}
                 project={project}
-                onOpen={() => onOpenProject(project.id, project.name)}
+                onOpen={(coverPath) =>
+                  onOpenProject(project.id, project.name, coverPath)
+                }
                 onDelete={() => handleDelete(project.id)}
                 onRename={handleRename}
               />
@@ -142,7 +154,7 @@ const EmptyState: FC<EmptyStateProps> = ({ onOpen, opening }) => (
 
 interface ProjectRowProps {
   project: Project
-  onOpen: () => void
+  onOpen: (coverPath: string | null) => void
   onDelete: () => void
   onRename: (id: string, newName: string) => void
 }
@@ -154,41 +166,52 @@ const ProjectRow: FC<ProjectRowProps> = ({
   onRename,
 }) => {
   const [isRenaming, setIsRenaming] = useState(false)
-  const [draft, setDraft] = useState('')
   const [localName, setLocalName] = useState(project.name)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [coverPath, setCoverPath] = useState(project.coverPath)
+  const [coverDialogOpen, setCoverDialogOpen] = useState(false)
+  const submittingRef = useRef(false)
+
+  const { register, handleSubmit, reset, setFocus } = useForm<RenameValues>({
+    resolver: zodResolver(renameSchema),
+    defaultValues: { name: project.name },
+  })
 
   useEffect(() => {
-    if (isRenaming) inputRef.current?.focus()
-  }, [isRenaming])
+    if (isRenaming) setFocus('name')
+  }, [isRenaming, setFocus])
 
   const startRenaming = () => {
-    setDraft(localName)
+    reset({ name: localName })
     setIsRenaming(true)
   }
 
   const cancelRename = () => {
+    reset()
     setIsRenaming(false)
-    setDraft('')
   }
 
-  const commitRename = async () => {
-    const trimmed = draft.trim()
-    if (trimmed && trimmed !== localName) {
-      try {
-        await api.renameProject(project.id, trimmed)
-        setLocalName(trimmed)
-        onRename(project.id, trimmed)
-      } catch (e) {
-        toast({
-          title: 'Failed to rename project',
-          description: String(e),
-        })
+  const commit = async ({ name }: RenameValues) => {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    try {
+      if (name !== localName) {
+        await api.renameProject(project.id, name)
+        setLocalName(name)
+        onRename(project.id, name)
       }
+    } catch (e) {
+      toast({ title: 'Failed to rename project', description: String(e) })
+    } finally {
+      submittingRef.current = false
+      setIsRenaming(false)
     }
-    setIsRenaming(false)
-    setDraft('')
   }
+
+  const {
+    ref: registerRef,
+    onBlur: _rhfOnBlur,
+    ...registerRest
+  } = register('name')
 
   const date = new Date(project.createdAt * 1000).toLocaleDateString(
     undefined,
@@ -200,97 +223,131 @@ const ProjectRow: FC<ProjectRowProps> = ({
   )
 
   return (
-    <li className="group relative rounded-xl border border-border bg-background transition hover:bg-background-secondary active:bg-foreground/5">
-      <button
-        type="button"
-        className="focus-visible:ring-(length:--ring-width) flex w-full flex-col gap-0.5 rounded-xl px-4 py-3 text-left outline-none ring-ring transition focus-visible:ring-inset"
-        style={{ cursor: isRenaming ? 'default' : 'pointer' }}
-        onClick={() => {
-          if (!isRenaming) onOpen()
-        }}
-      >
-        <div className="flex items-center gap-2">
-          {isRenaming ? (
-            <input
-              ref={inputRef}
-              className="min-w-0 flex-1 rounded bg-transparent font-medium text-foreground outline-none transition"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename()
-                if (e.key === 'Escape') cancelRename()
-              }}
-              onClick={(e) => e.stopPropagation()}
+    <>
+      <li className="group relative flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-3 transition hover:bg-background-secondary has-[[data-row-trigger]:active]:bg-foreground/5">
+        {/* Cover thumbnail — separate button so it doesn't nest inside the card button */}
+        <button
+          type="button"
+          aria-label="Change cover"
+          className="focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden rounded-lg outline-none ring-ring focus-visible:ring-inset"
+          onClick={() => setCoverDialogOpen(true)}
+        >
+          {coverPath ? (
+            <img
+              src={convertFileSrc(coverPath)}
+              alt="Cover"
+              className="h-14 w-10 object-cover"
             />
           ) : (
-            <>
-              <span className="truncate font-medium">{localName}</span>
-              <Tooltip>
-                <Tooltip.Trigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Rename project"
-                    className="focus-visible:ring-(length:--ring-width) -m-1 shrink-0 cursor-pointer rounded p-1 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70 group-hover:opacity-100"
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      startRenaming()
-                    }}
-                  >
-                    <Pencil className="size-3.5" />
-                  </button>
-                </Tooltip.Trigger>
-                <Tooltip.Content>Rename</Tooltip.Content>
-              </Tooltip>
-            </>
+            <div className="flex h-14 w-10 items-center justify-center bg-background-secondary">
+              <BookImage className="size-4 text-foreground-secondary" />
+            </div>
           )}
-        </div>
-        <span className="max-w-[500px] truncate text-foreground-secondary text-xs">
-          {project.rootPath}
-        </span>
-        <span className="text-foreground-secondary text-xs">
-          {project.chapterCount}{' '}
-          {project.chapterCount === 1 ? 'chapter' : 'chapters'} · {date}
-        </span>
-      </button>
+        </button>
 
-      <div className="absolute top-1/2 right-3 -translate-y-1/2">
-        <Dialog>
-          <Tooltip>
-            <Dialog.Trigger asChild>
-              <Tooltip.Trigger asChild>
-                <IconButton
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Delete project"
-                  className="opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <Trash2 className="size-4" />
-                </IconButton>
-              </Tooltip.Trigger>
-            </Dialog.Trigger>
-            <Tooltip.Content>Delete</Tooltip.Content>
-          </Tooltip>
-          <Dialog.Content className="w-80">
-            <Dialog.Title>Delete &ldquo;{localName}&rdquo;?</Dialog.Title>
-            <Dialog.Description>
-              This removes the project from fukuro. Your manga files won't be
-              deleted.
-            </Dialog.Description>
-            <Dialog.Actions>
-              <Dialog.Close asChild>
-                <Button variant="destructive" onClick={onDelete}>
-                  Delete
-                </Button>
-              </Dialog.Close>
-              <Dialog.Close asChild>
-                <Button variant="outline">Cancel</Button>
-              </Dialog.Close>
-            </Dialog.Actions>
-          </Dialog.Content>
-        </Dialog>
-      </div>
-    </li>
+        {/* Clickable text area */}
+        <button
+          type="button"
+          data-row-trigger
+          className="focus-visible:ring-(length:--ring-width) min-w-0 flex-1 rounded-lg text-left outline-none ring-ring transition focus-visible:ring-inset"
+          style={{ cursor: isRenaming ? 'default' : 'pointer' }}
+          onClick={() => {
+            if (!isRenaming) onOpen(coverPath)
+          }}
+        >
+          <div className="flex items-center gap-2">
+            {isRenaming ? (
+              <form onSubmit={handleSubmit(commit)} className="min-w-0 flex-1">
+                <input
+                  ref={registerRef}
+                  {...registerRest}
+                  className="w-full rounded bg-transparent font-medium text-foreground outline-none transition"
+                  onBlur={handleSubmit(commit, cancelRename)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      cancelRename()
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </form>
+            ) : (
+              <>
+                <span className="truncate font-medium">{localName}</span>
+                <Tooltip>
+                  <Tooltip.Trigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Rename project"
+                      className="focus-visible:ring-(length:--ring-width) -m-1 shrink-0 cursor-pointer rounded p-1 text-foreground-secondary opacity-0 ring-ring transition hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none active:opacity-70 group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        startRenaming()
+                      }}
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content>Rename</Tooltip.Content>
+                </Tooltip>
+              </>
+            )}
+          </div>
+          <span className="max-w-[500px] truncate text-foreground-secondary text-xs">
+            {project.rootPath}
+          </span>
+          <span className="text-foreground-secondary text-xs">
+            {project.chapterCount}{' '}
+            {project.chapterCount === 1 ? 'chapter' : 'chapters'} · {date}
+          </span>
+        </button>
+
+        <div className="absolute top-1/2 right-3 -translate-y-1/2">
+          <Dialog>
+            <Tooltip>
+              <Dialog.Trigger asChild>
+                <Tooltip.Trigger asChild>
+                  <IconButton
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Delete project"
+                    className="opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Trash2 className="size-4" />
+                  </IconButton>
+                </Tooltip.Trigger>
+              </Dialog.Trigger>
+              <Tooltip.Content>Delete</Tooltip.Content>
+            </Tooltip>
+            <Dialog.Content className="w-80">
+              <Dialog.Title>Delete &ldquo;{localName}&rdquo;?</Dialog.Title>
+              <Dialog.Description>
+                This removes the project from fukuro. Your manga files won't be
+                deleted.
+              </Dialog.Description>
+              <Dialog.Actions>
+                <Dialog.Close asChild>
+                  <Button variant="destructive" onClick={onDelete}>
+                    Delete
+                  </Button>
+                </Dialog.Close>
+                <Dialog.Close asChild>
+                  <Button variant="outline">Cancel</Button>
+                </Dialog.Close>
+              </Dialog.Actions>
+            </Dialog.Content>
+          </Dialog>
+        </div>
+      </li>
+      <CoverDialog
+        projectId={project.id}
+        coverPath={coverPath}
+        open={coverDialogOpen}
+        onOpenChange={setCoverDialogOpen}
+        onCoverChange={setCoverPath}
+      />
+    </>
   )
 }

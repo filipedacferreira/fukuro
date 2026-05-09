@@ -155,9 +155,7 @@ const Tooltip = ({ children, ...props }: TooltipProps) => {
     [floating, interactions],
   )
 
-  return (
-    <TooltipContext value={tooltipContextValue}>{children}</TooltipContext>
-  )
+  return <TooltipContext value={tooltipContextValue}>{children}</TooltipContext>
 }
 
 interface TooltipTriggerProps extends React.ComponentPropsWithRef<'button'> {

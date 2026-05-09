@@ -4,6 +4,8 @@ export interface Project {
   name: string
   createdAt: number
   chapterCount: number
+  coverPath: string | null
+  anilistId: number | null
 }
 
 export interface Chapter {

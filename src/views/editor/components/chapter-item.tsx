@@ -1,7 +1,10 @@
+import { zodResolver } from '@hookform/resolvers/zod'
 import { GripVertical, Pencil } from 'lucide-react'
 import { Reorder, useDragControls } from 'motion/react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { z } from 'zod'
 import { Disclosure } from '@/components/ui/disclosure'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -9,6 +12,11 @@ import { api } from '@/lib/tauri'
 import { cn } from '@/lib/utils/classnames'
 import type { Chapter } from '@/types'
 import { ImageGrid } from './image-grid'
+
+const renameSchema = z.object({
+  name: z.string().trim().min(1, 'Name cannot be empty'),
+})
+type RenameValues = z.infer<typeof renameSchema>
 
 interface ChapterItemProps {
   chapter: Chapter
@@ -26,11 +34,15 @@ export const ChapterItem: FC<ChapterItemProps> = ({
   const controls = useDragControls()
   const [dragging, setDragging] = useState(false)
   const [isRenaming, setIsRenaming] = useState(false)
-  const [draft, setDraft] = useState('')
   const [localName, setLocalName] = useState(chapter.displayName)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const submittingRef = useRef(false)
   const itemRef = useRef<HTMLDivElement>(null)
   const activeCount = chapter.imageCount - chapter.excludedCount
+
+  const { register, handleSubmit, reset, setFocus } = useForm<RenameValues>({
+    resolver: zodResolver(renameSchema),
+    defaultValues: { name: chapter.displayName },
+  })
 
   const handleOpenChange = (open: boolean) => {
     if (!open) return
@@ -40,33 +52,40 @@ export const ChapterItem: FC<ChapterItemProps> = ({
   }
 
   useEffect(() => {
-    if (isRenaming) inputRef.current?.focus()
-  }, [isRenaming])
+    if (isRenaming) setFocus('name')
+  }, [isRenaming, setFocus])
 
   const startRenaming = () => {
-    setDraft(localName)
+    reset({ name: localName })
     setIsRenaming(true)
   }
 
   const cancelRename = () => {
+    reset()
     setIsRenaming(false)
-    setDraft('')
   }
 
-  const commitRename = async () => {
-    const trimmed = draft.trim()
-    if (trimmed && trimmed !== localName) {
-      try {
-        await api.renameChapter(chapter.id, trimmed)
-        setLocalName(trimmed)
-      } catch (e) {
-        toast({ title: 'Failed to rename chapter', description: String(e) })
-        return
+  const commit = async ({ name }: RenameValues) => {
+    if (submittingRef.current) return
+    submittingRef.current = true
+    try {
+      if (name !== localName) {
+        await api.renameChapter(chapter.id, name)
+        setLocalName(name)
       }
+    } catch (e) {
+      toast({ title: 'Failed to rename chapter', description: String(e) })
+    } finally {
+      submittingRef.current = false
+      setIsRenaming(false)
     }
-    setIsRenaming(false)
-    setDraft('')
   }
+
+  const {
+    ref: registerRef,
+    onBlur: _rhfOnBlur,
+    ...registerRest
+  } = register('name')
 
   const rowContent = (
     <div
@@ -75,10 +94,12 @@ export const ChapterItem: FC<ChapterItemProps> = ({
         !isRenaming &&
           (dragging
             ? 'bg-foreground/10'
-            : 'hover:bg-foreground/5 active:bg-foreground/10'),
+            : 'hover:bg-foreground/5 has-[[data-row-trigger]:active]:bg-foreground/10'),
       )}
     >
-      {!isRenaming && <Disclosure.Trigger className="absolute inset-0 cursor-pointer focus-visible:ring-inset" />}
+      {!isRenaming && (
+        <Disclosure.Trigger data-row-trigger className="absolute inset-0 cursor-pointer focus-visible:ring-inset" />
+      )}
 
       <div className="pointer-events-none relative z-10 flex items-center gap-2 px-4 py-3">
         <button
@@ -96,17 +117,23 @@ export const ChapterItem: FC<ChapterItemProps> = ({
 
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {isRenaming ? (
-            <input
-              ref={inputRef}
-              className="pointer-events-auto min-w-0 flex-1 rounded bg-transparent font-medium text-foreground text-sm outline-none transition"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename()
-                if (e.key === 'Escape') cancelRename()
-              }}
-            />
+            <form
+              onSubmit={handleSubmit(commit)}
+              className="pointer-events-auto min-w-0 flex-1"
+            >
+              <input
+                ref={registerRef}
+                {...registerRest}
+                className="w-full rounded bg-transparent font-medium text-foreground text-sm outline-none transition"
+                onBlur={handleSubmit(commit, cancelRename)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    cancelRename()
+                  }
+                }}
+              />
+            </form>
           ) : (
             <>
               <span className="min-w-0 truncate font-medium text-sm">
@@ -164,7 +191,10 @@ export const ChapterItem: FC<ChapterItemProps> = ({
       onDragEnd={() => setDragging(false)}
     >
       <Disclosure onOpenChange={handleOpenChange}>
-        <div ref={itemRef} className="overflow-hidden rounded-xl border border-border bg-background">
+        <div
+          ref={itemRef}
+          className="overflow-hidden rounded-xl border border-border bg-background"
+        >
           {rowContent}
 
           <Disclosure.Content>
