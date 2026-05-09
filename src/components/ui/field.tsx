@@ -70,6 +70,7 @@ const FieldLabel = ({
 }: React.ComponentPropsWithRef<'label'>) => {
   const { controlId, labelId } = useFieldContext()
   return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: htmlFor is set via controlId from context
     <label
       htmlFor={controlId}
       id={labelId}

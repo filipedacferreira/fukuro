@@ -98,7 +98,10 @@ export const ChapterItem: FC<ChapterItemProps> = ({
       )}
     >
       {!isRenaming && (
-        <Disclosure.Trigger data-row-trigger className="absolute inset-0 cursor-pointer focus-visible:ring-inset" />
+        <Disclosure.Trigger
+          data-row-trigger
+          className="absolute inset-0 cursor-pointer focus-visible:ring-inset"
+        />
       )}
 
       <div className="pointer-events-none relative z-10 flex items-center gap-2 px-4 py-3">
