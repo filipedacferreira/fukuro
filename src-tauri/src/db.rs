@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, params};
 
 // DbState is a newtype wrapper around a Mutex-protected SQLite connection.
 // Tauri holds one instance of this for the entire app lifetime (registered in lib.rs
@@ -8,6 +8,18 @@ use rusqlite::{Connection, Result};
 // The Mutex ensures only one thread can query the database at a time.
 // `.0` accesses the inner field (Rust tuple-struct syntax).
 pub struct DbState(pub std::sync::Mutex<Connection>);
+
+// Returns true if `column` already exists in `table`.
+// Used by migrations that add new columns — ALTER TABLE has no IF NOT EXISTS
+// in the SQLite version bundled with rusqlite, so we check manually.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        params![table, column],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
 
 // Called once at startup (lib.rs) to set up pragmas and create tables.
 // `IF NOT EXISTS` makes this safe to run on every launch — it's a no-op
@@ -45,5 +57,16 @@ pub fn initialize(conn: &Connection) -> Result<()> {
              image_path TEXT NOT NULL,
              PRIMARY KEY (chapter_id, image_path)
          );",
-    )
+    )?;
+
+    // v2: cover image columns — added separately because ALTER TABLE ADD COLUMN
+    // has no IF NOT EXISTS in the bundled SQLite version, so we guard with pragma_table_info.
+    if !column_exists(conn, "projects", "cover_path") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN cover_path TEXT;")?;
+    }
+    if !column_exists(conn, "projects", "anilist_id") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN anilist_id INTEGER;")?;
+    }
+
+    Ok(())
 }

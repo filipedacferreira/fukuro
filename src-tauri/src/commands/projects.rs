@@ -18,6 +18,8 @@ pub struct Project {
     pub name: String,
     pub created_at: i64,
     pub chapter_count: i64,
+    pub cover_path: Option<String>,
+    pub anilist_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -125,6 +127,8 @@ pub fn create_project(
         name,
         created_at,
         chapter_count,
+        cover_path: None,
+        anilist_id: None,
     })
 }
 
@@ -136,7 +140,8 @@ pub fn list_projects(state: tauri::State<DbState>) -> Result<Vec<Project>, Strin
 
     let mut stmt = conn
         .prepare(
-            "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count
+            "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
+                    p.cover_path, p.anilist_id
              FROM projects p
              LEFT JOIN chapters c ON c.project_id = p.id
              GROUP BY p.id
@@ -154,6 +159,8 @@ pub fn list_projects(state: tauri::State<DbState>) -> Result<Vec<Project>, Strin
                 name: row.get(2)?,
                 created_at: row.get(3)?,
                 chapter_count: row.get(4)?,
+                cover_path: row.get(5)?,
+                anilist_id: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
