@@ -16,9 +16,12 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
         params![table, column],
+        // `r` is a Row. `.get::<_, i64>(0)` reads column index 0 as an i64.
+        // The turbofish `::<_, i64>` tells Rust what type to decode the value as;
+        // `_` lets Rust infer the index type (usize).
         |r| r.get::<_, i64>(0),
     )
-    .unwrap_or(0) > 0
+    .unwrap_or(0) > 0 // if the pragma fails for any reason, assume the column doesn't exist
 }
 
 // Called once at startup (lib.rs) to set up pragmas and create tables.

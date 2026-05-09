@@ -7,6 +7,10 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
+// #[cfg_attr(mobile, ...)] is a conditional attribute: it applies the inner attribute
+// only when compiling for a mobile target (iOS/Android). On desktop builds this line
+// has no effect. tauri::mobile_entry_point marks the function as the app entry point
+// for mobile platforms, which use a different startup model than desktop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

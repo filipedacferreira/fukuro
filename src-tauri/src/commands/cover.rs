@@ -27,18 +27,23 @@ fn covers_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, Strin
 // Re-encodes any supported image format to JPEG quality 100 and writes it to `dest`.
 fn encode_cover(source_bytes: &[u8], dest: &std::path::Path) -> Result<(), String> {
     let img = image::load_from_memory(source_bytes).map_err(|e| e.to_string())?;
+    // to_rgba8() normalises any pixel format (grayscale, palette, etc.) to 8-bit RGBA.
     let rgba = img.to_rgba8();
-    // Convert to RGB for JPEG (JPEG doesn't support alpha)
+    // JPEG doesn't support an alpha channel, so we must convert RGBA → RGB before encoding.
+    // Wrapping in ImageRgba8 and calling to_rgb8() is the idiomatic way to do this with the
+    // image crate — it flattens the alpha by compositing over a black background.
     let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
 
+    // Encode to an in-memory buffer first, then write the buffer to disk in one call.
+    // This avoids a partially-written file on disk if encoding fails midway.
     let mut buf = Vec::new();
     let encoder = JpegEncoder::new_with_quality(&mut buf, 100);
     encoder
         .write_image(
-            rgb.as_raw(),
+            rgb.as_raw(),  // raw pixel bytes as a flat &[u8]
             rgb.width(),
             rgb.height(),
-            image::ExtendedColorType::Rgb8,
+            image::ExtendedColorType::Rgb8, // tells the encoder each pixel is 3 bytes (R, G, B)
         )
         .map_err(|e| e.to_string())?;
 
@@ -83,6 +88,10 @@ pub fn set_project_cover(
 pub async fn fetch_anilist_cover(
     project_id: String,
     anilist_id: i64,
+    // tauri::State<'_, DbState>: the '_ is an inferred lifetime annotation. Rust requires
+    // async functions to name the lifetimes of references in their parameters. The underscore
+    // tells Rust to infer the lifetime automatically — it's equivalent to a named lifetime
+    // but without having to spell it out.
     state: tauri::State<'_, DbState>,
     app_handle: tauri::AppHandle,
 ) -> Result<AnilistResult, String> {
@@ -113,11 +122,19 @@ pub async fn fetch_anilist_cover(
         .await
         .map_err(|e| format!("Failed to parse Anilist response: {e}"))?;
 
+    // .pointer() navigates a serde_json Value using a JSON Pointer (RFC 6901).
+    // "/data/Media" means: descend into key "data", then key "Media".
+    // Returns None if any key is missing, so .ok_or() converts that to an Err.
     let media = gql_resp
         .pointer("/data/Media")
         .ok_or("Manga not found on Anilist")?;
 
-    // Prefer English title, fall back to romaji
+    // Build the display title by trying fields in priority order:
+    //   .pointer("/title/english") — navigate to the english title field
+    //   .and_then(|v| v.as_str()) — extract as &str (returns None if the JSON value isn't a string)
+    //   .filter(|s| !s.is_empty()) — treat empty string the same as missing
+    //   .or_else(|| ...) — if english was None/empty, try romaji instead
+    //   .unwrap_or("Unknown") — final fallback if both fields are absent
     let title = media
         .pointer("/title/english")
         .and_then(|v| v.as_str())
@@ -142,13 +159,21 @@ pub async fn fetch_anilist_cover(
         .await
         .map_err(|e| format!("Failed to read cover bytes: {e}"))?;
 
-    // Step 3: re-encode and store (CPU-bound — run on a blocking thread so we
-    // don't stall the async executor during image decoding/encoding)
+    // Step 3: re-encode and store.
+    // spawn_blocking() moves CPU-bound work (image decode + JPEG encode) onto a dedicated
+    // thread pool so it doesn't block the async executor, which is designed for I/O, not
+    // CPU work. Running heavy computation on the async executor starves other async tasks.
     let dest = covers_dir(&app_handle)?.join(format!("{project_id}.jpg"));
+    // The closure passed to spawn_blocking must be 'static (it outlives this stack frame),
+    // so it cannot borrow `dest` or `img_bytes` — we must clone/convert them into owned
+    // values that the closure takes ownership of via `move`.
     let dest_clone = dest.clone();
-    let img_bytes_vec = img_bytes.to_vec();
+    let img_bytes_vec = img_bytes.to_vec(); // Bytes → Vec<u8> so it's fully owned
     tauri::async_runtime::spawn_blocking(move || encode_cover(&img_bytes_vec, &dest_clone))
         .await
+        // The first ? unwraps the outer Result from spawn_blocking (JoinError if the thread panicked).
+        // The second ? unwraps the inner Result returned by encode_cover itself.
+        // This is the ?? "double question mark" pattern for nested Results.
         .map_err(|e| format!("Encoding task failed: {e}"))??;
 
     let cover_path = dest.to_string_lossy().to_string();

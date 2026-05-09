@@ -90,7 +90,12 @@ pub fn create_project(
     // Collect all immediate subdirectories and sort them by name.
     let mut entries: Vec<_> = std::fs::read_dir(root)
         .map_err(|e| e.to_string())?
+        // filter_map(|e| e.ok()) combines filter + map: it calls e.ok() on each item,
+        // keeps only the Some(...) results, and unwraps them. Items that return None
+        // (e.g. entries we don't have permission to read) are silently skipped.
         .filter_map(|e| e.ok())
+        // file_type() returns a Result, so we map it to a bool and default to false
+        // if it fails — this silently excludes entries whose type we can't determine.
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .collect();
 
@@ -149,7 +154,9 @@ pub fn list_projects(state: tauri::State<DbState>) -> Result<Vec<Project>, Strin
         )
         .map_err(|e| e.to_string())?;
 
-    // query_map runs the query and maps each row to a struct.
+    // query_map runs the query and calls the closure for each row, returning an iterator
+    // of Result<Project>. The closure must return Ok(...) even on success — that's how
+    // rusqlite signals the row was processed without error.
     // filter_map(|r| r.ok()) silently skips any rows that fail to deserialise.
     let projects = stmt
         .query_map([], |row| {
@@ -215,6 +222,9 @@ pub fn get_project_chapters(
         .map_err(|e| e.to_string())?;
 
     // Collect the folder paths of chapters already in the DB into a HashSet for O(1) lookup.
+    // The braces create a new scope so `stmt` is dropped (and its borrow of `conn` released)
+    // as soon as we've collected the results — Rust requires all borrows to end before
+    // we can use `conn` again below.
     let existing: HashSet<String> = {
         let mut stmt = conn
             .prepare("SELECT folder_path FROM chapters WHERE project_id = ?1")
@@ -223,9 +233,11 @@ pub fn get_project_chapters(
             .query_map(params![project_id], |r| r.get::<_, String>(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
+            // Normalise all stored paths to forward slashes before comparison,
+            // matching what normalize_path() produces when scanning disk.
             .map(|p: String| normalize_path(Path::new(&p)))
             .collect();
-        result
+        result // the last expression in a block is the block's return value
     };
 
     // Find subdirectories on disk that aren't in the DB yet.

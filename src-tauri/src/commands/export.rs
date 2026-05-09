@@ -76,6 +76,10 @@ pub fn create_cbz(
             .into_iter()
             .map(|(chapter_id, folder_path)| {
                 let excluded: HashSet<String> = {
+                    // We use .unwrap() here instead of ? because we're inside a closure
+                    // passed to .map(), and closures used with map() cannot propagate
+                    // errors with ?. prepare() failing here would be a bug (invalid SQL),
+                    // not a runtime error, so panicking is acceptable.
                     let mut stmt = conn
                         .prepare(
                             "SELECT image_path FROM excluded_images WHERE chapter_id = ?1",
@@ -83,7 +87,7 @@ pub fn create_cbz(
                         .unwrap();
                     stmt.query_map(params![chapter_id], |row| row.get(0))
                         .unwrap()
-                        .filter_map(|r| r.ok())
+                        .filter_map(|r| r.ok()) // silently skip any rows that fail to deserialise
                         .map(|p: String| normalize_path(std::path::Path::new(&p)))
                         .collect()
                 };
@@ -133,8 +137,9 @@ pub fn create_cbz(
                 ka.cmp(&kb)
             });
 
-            // Pair each image with the excluded set (already filtered, but we reuse the tuple).
-            // We only need the paths at this point; excluded set was already applied above.
+            // Exclusions were already applied by the filter above, so we push an empty
+            // HashSet as a placeholder — the tuple shape is kept consistent but the second
+            // field is never read again after this point.
             for img in images {
                 all_images.push((img, HashSet::new()));
             }
@@ -170,6 +175,11 @@ pub fn create_cbz(
         let mut global_index: u32 = if let Some(ref path) = cover_path {
             let cover_file = std::path::Path::new(path);
             if cover_file.exists() {
+                // Chain three fallible operations into a single Result:
+                //   1. start_file() — add a new entry to the ZIP
+                //   2. and_then(|_| fs::read(...)) — discard the () from start_file, read the file bytes
+                //   3. and_then(|data| write_all(...)) — write those bytes into the ZIP entry
+                // If any step fails, the chain short-circuits and returns the first Err.
                 if let Err(e) = zip
                     .start_file("0000.jpg", options)
                     .map_err(|e| e.to_string())

@@ -82,10 +82,10 @@ pub fn get_chapter_images(
             // Compute the expected thumbnail path from the filename stem.
             // e.g. "001.png" → "{thumb_dir}/001.jpg"
             let stem = Path::new(&filename)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
+                .file_stem()          // returns Option<&OsStr> — None only for hidden files like ".foo"
+                .unwrap_or_default()  // OsStr::default() is an empty OsStr, safe fallback
+                .to_string_lossy()    // converts OsStr to Cow<str> (borrowed if valid UTF-8, owned if not)
+                .into_owned();        // converts Cow<str> to an owned String we can store and move
             let thumb = thumb_dir.join(format!("{stem}.jpg"));
 
             // If the thumbnail exists, return its path. Otherwise fall back to the original
@@ -104,6 +104,8 @@ pub fn get_chapter_images(
     images.sort_by(|a, b| {
         let ka = natural_sort_key(&a.filename);
         let kb = natural_sort_key(&b.filename);
+        // Vec<String> implements Ord, so .cmp() does lexicographic comparison segment by segment.
+        // It returns std::cmp::Ordering::{Less, Equal, Greater}, which sort_by uses to rank the pair.
         ka.cmp(&kb)
     });
 
@@ -122,14 +124,16 @@ pub fn toggle_exclusion(
     let conn = state.0.lock().map_err(|e| e.to_string())?;
 
     // Check if a row already exists for this image.
+    // We use COUNT(*) > 0 rather than an EXISTS subquery because rusqlite's
+    // query_row always expects exactly one result row, which COUNT(*) guarantees.
     let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM excluded_images WHERE chapter_id = ?1 AND image_path = ?2",
             params![chapter_id, image_path],
-            |row| row.get::<_, i64>(0),
+            |row| row.get::<_, i64>(0), // extract the count as i64
         )
         .map_err(|e| e.to_string())?
-        > 0;
+        > 0; // convert the count to a bool: 0 → false, anything else → true
 
     if exists {
         // Already excluded → remove the row (include it again).
