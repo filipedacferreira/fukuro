@@ -147,7 +147,12 @@ Requires Rust (via rustup) and Node.js.
 pnpm install
 pnpm dev         # hot-reload dev server (tauri dev)
 pnpm build       # production build (tauri build)
+pnpm lint        # biome lint (check only, no writes)
+pnpm format      # biome check --write (lint + format + auto-fix)
+pnpm check       # biome check (lint + format, no writes)
 ```
+
+After making frontend changes, run `pnpm format` to auto-fix lint/format issues, then `pnpm check` to confirm no remaining violations.
 
 ## Component conventions
 
