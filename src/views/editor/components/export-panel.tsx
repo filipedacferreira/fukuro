@@ -1,3 +1,4 @@
+import { Channel } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Archive } from 'lucide-react'
@@ -6,6 +7,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
+import type { ExportEvent } from '@/types'
 
 interface ExportPanelProps {
   projectId: string
@@ -16,7 +18,12 @@ export const ExportPanel: FC<ExportPanelProps> = ({
   projectId,
   hasChapters,
 }) => {
-  const [exporting, setExporting] = useState(false)
+  const [progress, setProgress] = useState<{
+    current: number
+    total: number
+  } | null>(null)
+
+  const exporting = progress !== null
 
   const handleExport = async () => {
     const outputPath = await save({
@@ -25,31 +32,55 @@ export const ExportPanel: FC<ExportPanelProps> = ({
     })
     if (!outputPath) return
 
-    setExporting(true)
+    setProgress({ current: 0, total: 0 })
+
+    const path = outputPath as string
+
+    const channel = new Channel<ExportEvent>()
+    channel.onmessage = (event) => {
+      if (event.type === 'progress') {
+        setProgress({ current: event.current, total: event.total })
+      } else if (event.type === 'done') {
+        setProgress(null)
+        toast({
+          title: 'CBZ created',
+          description: path,
+          action: {
+            label: 'Show in folder',
+            onClick: () => revealItemInDir(path),
+          },
+        })
+      } else if (event.type === 'error') {
+        setProgress(null)
+        toast({
+          title: 'Export failed',
+          description: event.message,
+        })
+      }
+    }
+
     try {
-      await api.createCbz(projectId, outputPath as string)
-      toast({
-        title: 'CBZ created',
-        description: outputPath as string,
-        action: {
-          label: 'Show in folder',
-          onClick: () => revealItemInDir(outputPath as string),
-        },
-      })
+      await api.createCbz(projectId, outputPath as string, channel)
     } catch (e) {
+      setProgress(null)
       toast({
         title: 'Export failed',
         description: String(e),
       })
-    } finally {
-      setExporting(false)
     }
   }
+
+  const progressPercent =
+    progress && progress.total > 0
+      ? Math.round((progress.current / progress.total) * 100)
+      : null
 
   return (
     <div className="flex items-center justify-end gap-3 border-border border-t bg-background px-4 py-3">
       <p className="flex-1 text-foreground-secondary text-xs">
-        Images marked as excluded will be skipped during export.
+        {exporting && progressPercent !== null
+          ? `Exporting… ${progressPercent}%`
+          : 'Images marked as excluded will be skipped during export.'}
       </p>
       <Button
         onClick={handleExport}

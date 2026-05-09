@@ -29,3 +29,8 @@ export interface ThumbnailUpdate {
   imagePath: string
   thumbnailPath: string
 }
+
+export type ExportEvent =
+  | { type: 'progress'; current: number; total: number }
+  | { type: 'done'; outputPath: string }
+  | { type: 'error'; message: string }

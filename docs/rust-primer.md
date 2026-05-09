@@ -104,6 +104,37 @@ pub struct ImageMeta {
 
 When a Tauri command returns `Ok(image_meta)`, serde serialises it to JSON, Tauri sends it over IPC, and the TypeScript side receives a plain object matching the `ImageMeta` interface in `types.ts`.
 
+### Tagged enums — discriminated unions over a Channel
+
+When a command needs to stream *different kinds* of events (progress, success, error), a Rust enum serialises cleanly as a TypeScript discriminated union:
+
+```rust
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum ExportEvent {
+    Progress { current: u32, total: u32 },
+    Done { output_path: String },
+    Error { message: String },
+}
+```
+
+`tag = "type"` tells serde to add a `"type"` field to every variant's JSON object instead of the default serde wrapping. So `ExportEvent::Progress { current: 5, total: 10 }` becomes:
+
+```json
+{ "type": "progress", "current": 5, "total": 10 }
+```
+
+On the TypeScript side this maps directly to a discriminated union:
+
+```ts
+type ExportEvent =
+  | { type: 'progress'; current: number; total: number }
+  | { type: 'done'; outputPath: string }
+  | { type: 'error'; message: string }
+```
+
+The `Channel<ExportEvent>` generic on the Rust side and `Channel<ExportEvent>` on the TS side agree on the shape, so each `on_event.send(...)` call is type-safe end-to-end.
+
 ---
 
 ## `#[tauri::command]` — registering a function as callable from JS

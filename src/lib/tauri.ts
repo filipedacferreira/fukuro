@@ -1,5 +1,11 @@
 import { type Channel, invoke } from '@tauri-apps/api/core'
-import type { Chapter, ImageMeta, Project, ThumbnailUpdate } from '@/types'
+import type {
+  Chapter,
+  ExportEvent,
+  ImageMeta,
+  Project,
+  ThumbnailUpdate,
+} from '@/types'
 
 export const api = {
   createProject: (rootPath: string) =>
@@ -38,8 +44,11 @@ export const api = {
   hardDeleteImage: (chapterId: string, path: string) =>
     invoke<void>('hard_delete_image', { chapterId, path }),
 
-  createCbz: (projectId: string, outputPath: string) =>
-    invoke<string>('create_cbz', { projectId, outputPath }),
+  createCbz: (
+    projectId: string,
+    outputPath: string,
+    onEvent: Channel<ExportEvent>,
+  ) => invoke<void>('create_cbz', { projectId, outputPath, onEvent }),
 
   setProjectCover: (projectId: string, imagePath: string) =>
     invoke<string>('set_project_cover', { projectId, imagePath }),
