@@ -27,6 +27,18 @@ Each project can have a cover image that is included as the first file in the ex
 - Two actions: _Upload image_ and _Fetch from Anilist_ (text input for the ID)
 - Show the Anilist title as confirmation after a successful fetch so the user can verify the right entry was matched
 
+### Chapter number parsing
+
+Parse chapter numbers from folder names so `sort_order` and future metadata fields are seeded correctly rather than relying solely on filesystem order.
+
+**Patterns to recognise:** `Ch. 12`, `Chapter_012`, `第12話`, `Vol.2 Ch.5`, bare numeric prefixes (`012 - Title`)
+
+**Approach**
+
+- Run the parser in `create_project` and `get_project_chapters` (new subdir path) to set `sort_order` from the parsed number when present; fall back to directory enumeration order
+- Expose parsed number as a `chapter_number REAL` column (nullable, supports decimals like 12.5 for half-chapters)
+- Show the parsed number as a small badge in the chapter row; user can correct it inline
+
 ### Pre-export summary
 
 Before committing to an export, show a summary of what will be included so the user can catch mistakes.
@@ -77,6 +89,15 @@ Track when each project was last exported and to which path, so re-exporting doe
 
 ## Next
 
+### Chapter exclusion
+
+Let users exclude entire chapters from the CBZ export without deleting them, mirroring the per-image exclusion already in place.
+
+- Add an `is_excluded` column (boolean, default `false`) to the `chapters` table
+- Toggle via a button in the chapter row (same visual pattern as the image exclusion toggle)
+- `create_cbz` skips excluded chapters entirely; excluded chapters still appear in the editor so the user can re-include them
+- The pre-export summary (when built) should count excluded chapters alongside excluded images
+
 ### Batch export
 
 Export multiple projects to a target folder in one operation, without going through the file picker for each one.
@@ -114,18 +135,6 @@ Let users define a naming template for the exported file instead of always using
 
 - Template configured per-project, stored as a `filename_template TEXT` column on `projects`
 - Resolved at export time; file picker pre-fills the suggested name, user can still override
-
-### Chapter number parsing
-
-Parse chapter numbers from folder names so `sort_order` and future metadata fields are seeded correctly rather than relying solely on filesystem order.
-
-**Patterns to recognise:** `Ch. 12`, `Chapter_012`, `第12話`, `Vol.2 Ch.5`, bare numeric prefixes (`012 - Title`)
-
-**Approach**
-
-- Run the parser in `create_project` and `get_project_chapters` (new subdir path) to set `sort_order` from the parsed number when present; fall back to directory enumeration order
-- Expose parsed number as a `chapter_number REAL` column (nullable, supports decimals like 12.5 for half-chapters)
-- Show the parsed number as a small badge in the chapter row; user can correct it inline
 
 ---
 

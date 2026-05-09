@@ -222,6 +222,138 @@ pub path: String,           // field readable outside the module
 
 ---
 
+## `reqwest` — async HTTP inside a Tauri command
+
+Tauri runs on a Tokio async runtime. `reqwest::blocking` tries to spin up its own runtime internally, which panics when nested inside an existing one. The fix is to make the command `async` and use `reqwest::Client` (the async client) with `.await`.
+
+```rust
+#[tauri::command]
+pub async fn fetch_anilist_cover(
+    project_id: String,
+    anilist_id: i64,
+    state: tauri::State<'_, DbState>,   // note the explicit lifetime
+    app_handle: tauri::AppHandle,
+) -> Result<AnilistResult, String> {
+    let client = reqwest::Client::new();
+    // ...
+}
+```
+
+The `'_` lifetime on `tauri::State` is required for async commands — the compiler needs to know the state reference is tied to the function's lifetime, not `'static`.
+
+**POST with a JSON body**
+
+```rust
+let response: serde_json::Value = client
+    .post("https://graphql.anilist.co")
+    .json(&serde_json::json!({ "query": "...", "variables": { "id": 123 } }))
+    .send()
+    .await
+    .map_err(|e| format!("Request failed: {e}"))?
+    .json()
+    .await
+    .map_err(|e| format!("Parse failed: {e}"))?;
+```
+
+- `.json(&body)` serialises the body and sets `Content-Type: application/json`
+- `.send().await` suspends until the response headers arrive
+- `.json().await` reads and deserialises the response body
+
+**Navigating dynamic JSON with `.pointer()`**
+
+`serde_json::Value` lets you traverse the response without declaring a struct:
+
+```rust
+let title = response
+    .pointer("/data/Media/title/english")
+    .and_then(|v| v.as_str())
+    .unwrap_or("Unknown");
+```
+
+`.pointer("/a/b/c")` is equivalent to `response["a"]["b"]["c"]` but returns `Option<&Value>` rather than panicking on a missing key.
+
+**Downloading bytes**
+
+```rust
+let bytes = client
+    .get(&url)
+    .send()
+    .await
+    .map_err(|e| format!("Download failed: {e}"))?
+    .bytes()
+    .await
+    .map_err(|e| format!("Read failed: {e}"))?;
+```
+
+`.bytes().await` collects the full response body as raw bytes. Pass `&bytes` to `image::load_from_memory` directly.
+
+**Offloading CPU-bound work from async**
+
+Async executors are for I/O — blocking them with CPU-heavy work (image decoding/encoding) starves other tasks. Use `spawn_blocking` to run it on a dedicated thread pool:
+
+```rust
+let img_bytes_vec = bytes.to_vec();         // clone data before move
+let dest_clone = dest.clone();              // clone path before move
+
+tauri::async_runtime::spawn_blocking(move || {
+    encode_cover(&img_bytes_vec, &dest_clone)
+})
+.await
+.map_err(|e| format!("Encoding task failed: {e}"))??; // outer ? = JoinError, inner ? = encode error
+```
+
+The double `??` unwraps two layers: `spawn_blocking` returns `Result<Result<(), String>, JoinError>`, so we propagate both.
+
+**Accessing the DB after async work**
+
+Lock the mutex only after all async/blocking work is done — never hold a `MutexGuard` across an `.await` point (the compiler will reject it anyway, since `MutexGuard` is not `Send`):
+
+```rust
+// all network + encoding done first
+let conn = state.0.lock().map_err(|e| e.to_string())?;
+conn.execute("UPDATE projects SET ...", params![...])?;
+```
+
+---
+
+## Re-encoding images with the `image` crate
+
+The cover commands decode any supported input format and re-encode it as JPEG. This normalises the format and controls quality.
+
+```rust
+use image::ImageEncoder;
+use image::codecs::jpeg::JpegEncoder;
+
+// Load from raw bytes — detects format automatically (JPEG, PNG, WebP, etc.)
+let img = image::load_from_memory(&source_bytes).map_err(|e| e.to_string())?;
+
+// Convert to RGB (JPEG doesn't support an alpha channel)
+let rgb = img.to_rgb8();
+
+// Encode to an in-memory buffer at a specific quality (0–100)
+let mut buf = Vec::new();
+let encoder = JpegEncoder::new_with_quality(&mut buf, 100);
+encoder
+    .write_image(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )
+    .map_err(|e| e.to_string())?;
+
+// Write the buffer to disk
+std::fs::write(&dest_path, &buf).map_err(|e| e.to_string())?;
+```
+
+Key points:
+- `load_from_memory` auto-detects format from the bytes header (no file extension needed)
+- `to_rgb8()` converts RGBA/greyscale to RGB so JPEG encoding doesn't fail
+- `JpegEncoder::new_with_quality(&mut buf, 100)` — quality 100 means maximum fidelity
+- Writing to `Vec<u8>` first avoids partial-write corruption if encoding fails mid-way
+
+---
+
 ## Practical reading order
 
 If you want to trace a full request through the stack, follow this path:
