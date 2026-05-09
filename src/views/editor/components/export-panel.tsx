@@ -5,6 +5,7 @@ import { Archive } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
 import type { ExportEvent } from '@/types'
@@ -70,21 +71,25 @@ export const ExportPanel: FC<ExportPanelProps> = ({
     }
   }
 
-  const progressPercent =
-    progress && progress.total > 0
-      ? Math.round((progress.current / progress.total) * 100)
-      : null
-
   return (
     <div className="flex items-center justify-end gap-3 border-border border-t bg-background px-4 py-3">
-      <p className="flex-1 text-foreground-secondary text-xs">
-        {exporting && progressPercent !== null
-          ? `Exporting… ${progressPercent}%`
-          : 'Images marked as excluded will be skipped during export.'}
-      </p>
+      <div className="flex flex-1 flex-col gap-1.5">
+        <p className="text-foreground-secondary text-xs">
+          {exporting
+            ? 'Exporting…'
+            : 'Images marked as excluded will be skipped during export.'}
+        </p>
+        {exporting && (
+          <Progress
+            value={progress?.current ?? 0}
+            max={progress?.total || 1}
+            size="sm"
+            className="max-w-32"
+          />
+        )}
+      </div>
       <Button
         onClick={handleExport}
-        isLoading={exporting}
         disabled={!hasChapters || exporting}
         size="sm"
       >
