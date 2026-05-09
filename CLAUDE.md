@@ -13,6 +13,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 | Drag-to-reorder | motion/react (`Reorder`) |
 | Local DB | SQLite via `rusqlite` (bundled) |
 | Zipping | `zip` crate |
+| HTTP client | `reqwest` (async + json features) |
 | Image decoding | `image` crate (jpeg, png, gif, webp) |
 | Thumbnail resize | `fast_image_resize` (SIMD-accelerated, bilinear) |
 | Parallel processing | `rayon` |
@@ -42,6 +43,7 @@ src/
     ui/                           # Significa Foundations UI (copied, not installed)
       slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx
       input.tsx modal.tsx skeleton.tsx spinner.tsx toaster.tsx
+    cover-dialog.tsx              # Shared cover dialog (open from project list or editor)
   hooks/                          # Foundations hooks (copied from foundations.significa.co)
     use-element-transition.ts
     use-top-layer.ts
@@ -60,6 +62,7 @@ src-tauri/src/
     images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
     export.rs                     # create_cbz
+    cover.rs                      # set_project_cover, fetch_anilist_cover, remove_project_cover
 ```
 
 ## Database
@@ -67,10 +70,12 @@ src-tauri/src/
 SQLite at `{AppData}/fukuro.db` (macOS: `~/Library/Application Support/io.fukuro/fukuro.db`).
 
 ```sql
-projects       (id, root_path, name, created_at)
+projects       (id, root_path, name, created_at, cover_path, anilist_id)
 chapters       (id, project_id→projects, folder_path, display_name, sort_order, image_count)
 excluded_images(chapter_id→chapters, image_path)  -- soft-delete exclusions
 ```
+
+`cover_path` and `anilist_id` are nullable — added via `ALTER TABLE` migration in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`).
 
 Foreign keys with `ON DELETE CASCADE`. WAL mode enabled.
 
@@ -92,7 +97,10 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + thumbnail cache cleanup + DB cleanup |
 | `generate_chapter_thumbnails_stream(chapterId, onEvent)` | Spawns background thread; generates thumbnails in parallel via rayon and streams `ThumbnailUpdate` events through a Tauri Channel |
 | `clear_thumbnail_cache()` | Deletes `{AppData}/thumbnails/` entirely (dev menu action) |
-| `create_cbz(projectId, outputPath)` | Zip all non-excluded images in chapter/page order |
+| `create_cbz(projectId, outputPath)` | Zip all non-excluded images in chapter/page order; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
+| `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100, store in `{AppData}/covers/`, update DB |
+| `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, re-encode and store; returns `{ title, coverPath }` |
+| `remove_project_cover(projectId)` | Delete cover file and clear `cover_path`/`anilist_id` in DB |
 
 ## Thumbnail cache
 
@@ -132,6 +140,8 @@ The developer is new to Rust and Tauri. `docs/rust-primer.md` is a living refere
 - A concept is used in a more complex or nuanced way than previously documented
 
 The goal is that the developer can read any file in `src-tauri/` and immediately look up what an unfamiliar construct does in the primer. Do not let the primer fall out of sync. Prefer updating an existing entry over adding a new one if the concept already has coverage.
+
+All Rust source files must have descriptive inline comments, even for constructs that may seem obvious. These comments complement the primer and help the developer build intuition while reading code directly.
 
 ## Git commits
 
