@@ -1,0 +1,9 @@
+{
+  "formatter": {
+    "external": {
+      "command": "pnpm",
+      "arguments": ["biome", "check", "--write", "--stdin-file-path", "{buffer_path}"]
+    }
+  },
+  "format_on_save": "on"
+}
