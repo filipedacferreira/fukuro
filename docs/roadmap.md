@@ -72,6 +72,28 @@ When a project's `root_path` or a chapter's `folder_path` no longer exists on di
 - Real-time file watching (not needed — recovery on next open is sufficient)
 - Chapters whose subfolder was deleted (not renamed) — those should be flagged as missing and offer a remove option
 
+### Developer mode
+
+A toggleable developer mode (off by default) that surfaces low-level tooling without cluttering the main UI. Replaces the current **Tools → Clear Thumbnail Cache** menu item — all dev actions live here instead.
+
+**How to activate**
+
+- Hidden toggle in a future Settings screen (or a keyboard shortcut / secret click target in the meantime)
+- When active, a small "DEV" badge appears in the app header so it's obvious the mode is on
+
+**Actions**
+
+- **Clear Thumbnail Cache** — deletes `{AppData}/thumbnails/` entirely (moved from the Tools menu)
+- **Force Thumbnail Regeneration** — deletes the thumbnail cache for the currently open chapter only and re-runs generation; useful when tweaking the thumbnail pipeline without wiping everything
+- **Open App Data Folder** — reveals `{AppData}/io.fukuro/` in the system file manager (covers, thumbnails, and the DB all in one place)
+- **Copy DB Path** — copies the absolute path of `fukuro.db` to the clipboard so it can be opened in an external SQLite viewer
+- **Reset Database** — drops and recreates all tables; nuclear option for when a schema migration goes wrong during development (requires a confirmation prompt)
+- **Reload Current Project** — forces a `get_project_chapters` re-scan without navigating away; handy when iterating on Rust commands
+- **Show Raw Paths** — toggles the editor to display raw `folder_path` / `image_path` values instead of display names
+- **Export Debug Info** — copies a plain-text dump of project/chapter/image counts and current config to the clipboard, intended for bug reports
+
+---
+
 ### Export history
 
 Track when each project was last exported and to which path, so re-exporting doesn't require going through the file picker again.
