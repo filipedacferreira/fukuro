@@ -1,38 +1,37 @@
-import { convertFileSrc } from '@tauri-apps/api/core'
-import { ArrowLeft, BookImage } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
 import { CoverDialog } from '@/components/cover-dialog'
+import { CoverThumbnail } from '@/components/cover-thumbnail'
 import { IconButton } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
-import type { Chapter } from '@/types'
+import type { Chapter, CoverInfo, Project } from '@/types'
 import { ChapterList } from './components/chapter-list'
 import { ExportPanel } from './components/export-panel'
 
 interface EditorProps {
-  projectId: string
-  projectName: string
-  initialCoverPath: string | null
+  project: Project
   onBack: () => void
 }
 
-export const Editor: FC<EditorProps> = ({
-  projectId,
-  projectName,
-  initialCoverPath,
-  onBack,
-}) => {
+export const Editor: FC<EditorProps> = ({ project, onBack }) => {
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [loading, setLoading] = useState(true)
-  const [coverPath, setCoverPath] = useState(initialCoverPath)
+  const [cover, setCover] = useState<CoverInfo>({
+    coverPath: project.coverPath,
+    anilistId: project.anilistId,
+    coverTitle: project.coverTitle,
+  })
+  // Seed with Date.now() so the URL is unique per session, preventing stale cache across restarts.
+  const [coverVersion, setCoverVersion] = useState(() => Date.now())
   const [coverDialogOpen, setCoverDialogOpen] = useState(false)
 
   useEffect(() => {
     api
-      .getProjectChapters(projectId)
+      .getProjectChapters(project.id)
       .then(setChapters)
       .catch((e) =>
         toast({
@@ -41,7 +40,7 @@ export const Editor: FC<EditorProps> = ({
         }),
       )
       .finally(() => setLoading(false))
-  }, [projectId])
+  }, [project.id])
 
   const handleReorder = async (newChapters: Chapter[]) => {
     setChapters(newChapters)
@@ -88,35 +87,27 @@ export const Editor: FC<EditorProps> = ({
           <ArrowLeft className="size-4" />
         </IconButton>
 
-        {/* Compact cover thumbnail — click to open cover dialog */}
-        <button
-          type="button"
-          aria-label="Change cover"
-          className="focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden rounded outline-none ring-ring focus-visible:ring-inset"
+        <CoverThumbnail
+          coverPath={cover.coverPath}
+          coverVersion={coverVersion}
+          size="sm"
           onClick={() => setCoverDialogOpen(true)}
-        >
-          {coverPath ? (
-            <img
-              src={convertFileSrc(coverPath)}
-              alt="Cover"
-              className="h-8 w-auto rounded object-cover"
-            />
-          ) : (
-            <div className="flex h-8 w-6 items-center justify-center rounded bg-background-secondary">
-              <BookImage className="size-3.5 text-foreground-secondary" />
-            </div>
-          )}
-        </button>
+        />
 
-        <h1 className="flex-1 truncate font-semibold text-sm">{projectName}</h1>
+        <h1 className="flex-1 truncate font-semibold text-sm">
+          {project.name}
+        </h1>
       </header>
 
       <CoverDialog
-        projectId={projectId}
-        coverPath={coverPath}
+        projectId={project.id}
+        cover={cover}
         open={coverDialogOpen}
         onOpenChange={setCoverDialogOpen}
-        onCoverChange={setCoverPath}
+        onCoverChange={(newCover) => {
+          setCover(newCover)
+          setCoverVersion(Date.now())
+        }}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -138,7 +129,7 @@ export const Editor: FC<EditorProps> = ({
           )}
         </motion.div>
 
-        <ExportPanel projectId={projectId} hasChapters={chapters.length > 0} />
+        <ExportPanel projectId={project.id} hasChapters={chapters.length > 0} />
       </div>
     </div>
   )
