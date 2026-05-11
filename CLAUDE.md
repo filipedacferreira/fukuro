@@ -22,28 +22,34 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 
 ```
 src/
-  app.tsx                         # Top-level view router (projects ↔ editor)
+  app.tsx                         # Top-level view router (projects ↔ editor); holds View union state
   main.tsx                        # React entry point
-  types.ts                        # Shared TS types (Project, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
+  types.ts                        # Shared TS types (Project, CoverInfo, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
   index.css                       # Tailwind v4 + Foundations CSS tokens
   lib/
     tauri.ts                      # Typed invoke() wrappers for all Rust commands
+    validation.ts                 # Shared zod schemas (renameSchema / RenameValues)
     utils/classnames.ts           # CVA + tailwind-merge setup (cn, cva)
   views/
     projects/                     # Projects list view
       project-list.tsx            # Home screen: recent projects, open folder
+      components/
+        project-row.tsx           # Project card + ProjectRenameDialog + ProjectDeleteDialog
     editor/                       # Editor view
       editor.tsx                  # Main workspace: chapter list + export panel
       components/
         chapter-list.tsx          # DnD context + sortable list
-        chapter-item.tsx          # Single chapter row: drag, rename, expand
+        chapter-item.tsx          # Drag orchestration + scroll behaviour; composes ChapterRow + ImageGrid
+        chapter-row.tsx           # Chapter header row: drag handle, inline rename, image count
         image-grid.tsx            # Thumbnail grid with exclusion toggle + streaming optimiser
+        image-card.tsx            # Single image card with exclude toggle + delete dialog
         export-panel.tsx          # Save dialog + export button
   components/
     ui/                           # Significa Foundations UI (copied, not installed)
       slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx
       field.tsx input.tsx modal.tsx progress.tsx skeleton.tsx spinner.tsx toaster.tsx tooltip.tsx
-    cover-dialog.tsx              # Shared cover dialog (open from project list or editor)
+    cover-dialog.tsx              # Shared cover dialog; accepts projectId + cover: CoverInfo + onCoverChange: (CoverInfo) => void
+    cover-thumbnail.tsx           # Shared cover button (sm/lg sizes); used in editor header + project cards
   hooks/                          # Foundations hooks (copied from foundations.significa.co)
     use-element-transition.ts
     use-top-layer.ts
@@ -183,6 +189,20 @@ export const MyComponent: FC<MyComponentProps> = ({ value }) => {
 - Always `import type { FC } from 'react'`
 - Always declare a `Props` interface (even if empty, except for trivial internal sub-components)
 - No `function` keyword declarations for components in this layer
+
+## Component architecture
+
+Composability over configuration. When a component grows hard to read, break it into focused named pieces — not by adding props, but by extracting sub-components with explicit, minimal interfaces.
+
+**Rules of thumb:**
+- A JSX block assigned to a `const` variable and used once is a component waiting to be named. Make it an `FC`.
+- Props that always travel together (e.g. `coverPath + anilistId + coverTitle`) belong in a shared type (`CoverInfo`). Callers hold one state var; the callback takes one argument.
+- Props that leak internal state (form refs, register functions, submit handlers) signal the wrong owner. Move the form logic into the component that renders it.
+- Make event callbacks optional (`onRenamed?`) when a no-op is the natural default and the parent legitimately doesn't care.
+- When the same UI pattern appears in two places, extract a shared primitive (`CoverThumbnail`, `renameSchema`) before it appears a third time.
+- Navigation state should carry domain objects (`project: Project`), not unpacked fields.
+
+**What not to extract:** stable, single-use components with a clear single concern (e.g. `ExportPanel`, `CoverDialog`) are fine as-is even if sizeable. Only extract when the complexity is accidental, not inherent.
 
 ## Path aliases
 
