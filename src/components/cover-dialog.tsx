@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { BookImage, Loader2, Trash2, Upload } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
@@ -12,36 +13,46 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
+import type { CoverInfo } from '@/types'
 
 const anilistSchema = z.object({
   anilistId: z
     .string()
     .trim()
     .min(1, 'Required')
-    .regex(/^\d+$/, 'Must be a valid Anilist ID')
-    .transform(Number),
+    // Accept either a bare ID ("30013") or an Anilist URL ("anilist.co/manga/30013/...").
+    .transform((val) => {
+      const match = val.match(/\/manga\/(\d+)/)
+      return match ? match[1] : val
+    })
+    .pipe(
+      z.string().regex(/^\d+$/, 'Must be a valid Anilist ID').transform(Number),
+    ),
 })
 type AnilistInput = z.input<typeof anilistSchema> // { anilistId: string } — form field type
 type AnilistOutput = z.output<typeof anilistSchema> // { anilistId: number } — submit handler type
 
 interface CoverDialogProps {
   projectId: string
-  coverPath: string | null
+  cover: CoverInfo
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCoverChange: (newPath: string | null) => void
+  onCoverChange: (cover: CoverInfo) => void
 }
 
 export const CoverDialog: FC<CoverDialogProps> = ({
   projectId,
-  coverPath,
+  cover,
   open,
   onOpenChange,
   onCoverChange,
 }) => {
+  const { coverPath, anilistId, coverTitle } = cover
   const [uploading, setUploading] = useState(false)
   const [removing, setRemoving] = useState(false)
-  const [anilistTitle, setAnilistTitle] = useState<string | null>(null)
+  // Mirrors the anilistId/coverTitle props but stays in sync with changes made this session.
+  const [localAnilistId, setLocalAnilistId] = useState(anilistId)
+  const [localCoverTitle, setLocalCoverTitle] = useState(coverTitle)
 
   const {
     register,
@@ -54,10 +65,11 @@ export const CoverDialog: FC<CoverDialogProps> = ({
 
   useEffect(() => {
     if (open) {
-      resetForm()
-      setAnilistTitle(null)
+      resetForm({ anilistId: anilistId ? String(anilistId) : '' })
+      setLocalAnilistId(anilistId)
+      setLocalCoverTitle(coverTitle)
     }
-  }, [open, resetForm])
+  }, [open, anilistId, coverTitle, resetForm])
 
   const handleUpload = async () => {
     const selected = await openFilePicker({
@@ -68,8 +80,9 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     setUploading(true)
     try {
       const newPath = await api.setProjectCover(projectId, selected as string)
-      onCoverChange(newPath)
-      setAnilistTitle(null)
+      onCoverChange({ coverPath: newPath, anilistId: null, coverTitle: null })
+      setLocalAnilistId(null)
+      setLocalCoverTitle(null)
       toast({ title: 'Cover updated' })
     } catch (e) {
       toast({
@@ -82,12 +95,19 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     }
   }
 
-  const handleFetchAnilist = async ({ anilistId }: AnilistOutput) => {
+  const handleFetchAnilist = async ({
+    anilistId: fetchedId,
+  }: AnilistOutput) => {
     try {
-      const result = await api.fetchAnilistCover(projectId, anilistId)
-      onCoverChange(result.coverPath)
-      setAnilistTitle(result.title)
-      resetForm()
+      const result = await api.fetchAnilistCover(projectId, fetchedId)
+      onCoverChange({
+        coverPath: result.coverPath,
+        anilistId: fetchedId,
+        coverTitle: result.title,
+      })
+      setLocalAnilistId(fetchedId)
+      setLocalCoverTitle(result.title)
+      resetForm({ anilistId: String(fetchedId) })
       toast({ title: 'Cover fetched', description: result.title })
     } catch (e) {
       toast({
@@ -102,8 +122,9 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     setRemoving(true)
     try {
       await api.removeProjectCover(projectId)
-      onCoverChange(null)
-      setAnilistTitle(null)
+      onCoverChange({ coverPath: null, anilistId: null, coverTitle: null })
+      setLocalAnilistId(null)
+      setLocalCoverTitle(null)
       toast({ title: 'Cover removed' })
     } catch (e) {
       toast({
@@ -197,9 +218,18 @@ export const CoverDialog: FC<CoverDialogProps> = ({
               </Button>
             </form>
             <Field.Error>{errors.anilistId?.message}</Field.Error>
-            {anilistTitle && !errors.anilistId && (
+            {(localCoverTitle || localAnilistId) && !errors.anilistId && (
               <Field.Description>
-                Matched: <span className="text-foreground">{anilistTitle}</span>
+                Fetched from Anilist ·{' '}
+                <button
+                  type="button"
+                  className="cursor-pointer text-foreground underline-offset-2 hover:underline"
+                  onClick={() =>
+                    openUrl(`https://anilist.co/manga/${localAnilistId}`)
+                  }
+                >
+                  {localCoverTitle ?? `ID ${localAnilistId}`}
+                </button>
               </Field.Description>
             )}
           </Field>
