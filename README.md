@@ -10,10 +10,11 @@ Manga chapters arrive as folders of numbered images with inconsistent names and 
 
 - **Open a manga folder** — scans all subfolders as chapters, counts images per chapter
 - **Reorder chapters** — drag-and-drop to set the final reading order
-- **Rename chapters** — click any chapter name to rename inline
+- **Rename chapters and projects** — click any name to rename inline
 - **Cull images** — expand a chapter to see all pages as thumbnails; click to soft-exclude or trash to hard-delete from disk
-- **Export CBZ** — packs all non-excluded images into a single `.cbz` with zero-padded sequential filenames
-- **Persistent state** — all ordering, renames, and exclusions are saved locally; work survives app restarts
+- **Cover image** — set a project cover via manual upload or by fetching from Anilist (by manga ID); cover is prepended to the exported CBZ
+- **Export CBZ** — packs all non-excluded images into a single `.cbz` with zero-padded sequential filenames; progress bar shown during export
+- **Persistent state** — all ordering, renames, exclusions, and covers are saved locally; work survives app restarts
 
 ## Stack
 
