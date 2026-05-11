@@ -68,8 +68,9 @@ pub fn set_project_cover(
     let cover_path = dest.to_string_lossy().to_string();
 
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+    // Uploading a new local image replaces any previous Anilist association.
     conn.execute(
-        "UPDATE projects SET cover_path = ?1 WHERE id = ?2",
+        "UPDATE projects SET cover_path = ?1, anilist_id = NULL, cover_title = NULL WHERE id = ?2",
         params![cover_path, project_id],
     )
     .map_err(|e| e.to_string())?;
@@ -159,30 +160,19 @@ pub async fn fetch_anilist_cover(
         .await
         .map_err(|e| format!("Failed to read cover bytes: {e}"))?;
 
-    // Step 3: re-encode and store.
-    // spawn_blocking() moves CPU-bound work (image decode + JPEG encode) onto a dedicated
-    // thread pool so it doesn't block the async executor, which is designed for I/O, not
-    // CPU work. Running heavy computation on the async executor starves other async tasks.
+    // Step 3: store raw bytes.
+    // Anilist always serves JPEG; writing the bytes directly avoids a lossy decode→re-encode
+    // cycle that would inflate file size without any quality gain.
     let dest = covers_dir(&app_handle)?.join(format!("{project_id}.jpg"));
-    // The closure passed to spawn_blocking must be 'static (it outlives this stack frame),
-    // so it cannot borrow `dest` or `img_bytes` — we must clone/convert them into owned
-    // values that the closure takes ownership of via `move`.
-    let dest_clone = dest.clone();
-    let img_bytes_vec = img_bytes.to_vec(); // Bytes → Vec<u8> so it's fully owned
-    tauri::async_runtime::spawn_blocking(move || encode_cover(&img_bytes_vec, &dest_clone))
-        .await
-        // The first ? unwraps the outer Result from spawn_blocking (JoinError if the thread panicked).
-        // The second ? unwraps the inner Result returned by encode_cover itself.
-        // This is the ?? "double question mark" pattern for nested Results.
-        .map_err(|e| format!("Encoding task failed: {e}"))??;
+    std::fs::write(&dest, &img_bytes).map_err(|e| format!("Failed to save cover: {e}"))?;
 
     let cover_path = dest.to_string_lossy().to_string();
 
     // Step 4: persist to DB
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE projects SET cover_path = ?1, anilist_id = ?2 WHERE id = ?3",
-        params![cover_path, anilist_id, project_id],
+        "UPDATE projects SET cover_path = ?1, anilist_id = ?2, cover_title = ?3 WHERE id = ?4",
+        params![cover_path, anilist_id, title, project_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -203,7 +193,7 @@ pub fn remove_project_cover(
 
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE projects SET cover_path = NULL, anilist_id = NULL WHERE id = ?1",
+        "UPDATE projects SET cover_path = NULL, anilist_id = NULL, cover_title = NULL WHERE id = ?1",
         params![project_id],
     )
     .map_err(|e| e.to_string())?;

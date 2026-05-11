@@ -70,6 +70,11 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "projects", "anilist_id") {
         conn.execute_batch("ALTER TABLE projects ADD COLUMN anilist_id INTEGER;")?;
     }
+    // v3: store the resolved manga title alongside the Anilist ID so the UI can display
+    // a meaningful label without making a network request.
+    if !column_exists(conn, "projects", "cover_title") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN cover_title TEXT;")?;
+    }
 
     Ok(())
 }
