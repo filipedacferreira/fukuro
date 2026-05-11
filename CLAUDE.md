@@ -24,7 +24,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 src/
   app.tsx                         # Top-level view router (projects ↔ editor)
   main.tsx                        # React entry point
-  types.ts                        # Shared TS types (Project, Chapter, ImageMeta, ThumbnailUpdate)
+  types.ts                        # Shared TS types (Project, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
   index.css                       # Tailwind v4 + Foundations CSS tokens
   lib/
     tauri.ts                      # Typed invoke() wrappers for all Rust commands
@@ -42,7 +42,7 @@ src/
   components/
     ui/                           # Significa Foundations UI (copied, not installed)
       slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx
-      input.tsx modal.tsx skeleton.tsx spinner.tsx toaster.tsx
+      field.tsx input.tsx modal.tsx progress.tsx skeleton.tsx spinner.tsx toaster.tsx tooltip.tsx
     cover-dialog.tsx              # Shared cover dialog (open from project list or editor)
   hooks/                          # Foundations hooks (copied from foundations.significa.co)
     use-element-transition.ts
@@ -97,7 +97,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + thumbnail cache cleanup + DB cleanup |
 | `generate_chapter_thumbnails_stream(chapterId, onEvent)` | Spawns background thread; generates thumbnails in parallel via rayon and streams `ThumbnailUpdate` events through a Tauri Channel |
 | `clear_thumbnail_cache()` | Deletes `{AppData}/thumbnails/` entirely (dev menu action) |
-| `create_cbz(projectId, outputPath)` | Zip all non-excluded images in chapter/page order; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
+| `create_cbz(projectId, outputPath, onEvent)` | Zip all non-excluded images in chapter/page order; streams `progress` / `done` / `error` events via Channel; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
 | `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100, store in `{AppData}/covers/`, update DB |
 | `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, re-encode and store; returns `{ title, coverPath }` |
 | `remove_project_cover(projectId)` | Delete cover file and clear `cover_path`/`anilist_id` in DB |
@@ -193,7 +193,7 @@ export const MyComponent: FC<MyComponentProps> = ({ value }) => {
 Foundations UI components, hooks, and utils are **not** installed as a package — they are copied source files from [foundations.significa.co](https://foundations.significa.co). When updating a component, copy the new source from the site rather than editing in place.
 
 They live alongside all other app code with no special namespace:
-- UI components: `src/components/ui/{name}.tsx` (button, dialog, disclosure, divider, input, modal, skeleton, spinner, toaster, slot)
+- UI components: `src/components/ui/{name}.tsx` (button, dialog, disclosure, divider, field, input, modal, progress, skeleton, spinner, toaster, tooltip, slot)
 - Hooks: `src/hooks/{name}.ts` (use-element-transition, use-top-layer)
 - Utils: `src/utils/{name}.ts` (compose-refs, next-frame)
 
