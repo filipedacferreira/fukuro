@@ -2,31 +2,6 @@
 
 ## Now
 
-### Cover image
-
-Each project can have a cover image that is included as the first file in the exported `.cbz` (before any chapter pages).
-
-**Sources**
-
-- **Manual upload** — user picks any image file; stored in `{AppData}/covers/{project_id}.jpg` (re-encoded to JPEG for consistency)
-- **Anilist** — user provides an Anilist manga ID; the app fetches the cover URL from the Anilist GraphQL API (`https://graphql.anilist.co`) and downloads it automatically
-
-**DB changes**
-
-- Add `cover_path TEXT` (nullable) and `anilist_id INTEGER` (nullable) columns to `projects`
-
-**Rust commands**
-
-- `set_project_cover(projectId, imagePath)` — copy + re-encode image to `covers/` dir, update `cover_path`
-- `fetch_anilist_cover(projectId, anilistId)` — call Anilist GraphQL, download cover, store same as above, persist `anilist_id`
-- `create_cbz` — if `cover_path` is set and the file exists, insert it as `cover.jpg` at position 0 before the chapter pages
-
-**UI**
-
-- Cover thumbnail in the editor header (placeholder when unset)
-- Two actions: _Upload image_ and _Fetch from Anilist_ (text input for the ID)
-- Show the Anilist title as confirmation after a successful fetch so the user can verify the right entry was matched
-
 ### Chapter number parsing
 
 Parse chapter numbers from folder names so `sort_order` and future metadata fields are seeded correctly rather than relying solely on filesystem order.
