@@ -1,7 +1,7 @@
 # Iteration 2 — Cover Image
 
 **Date:** May 2026
-**Status:** Planned
+**Status:** Complete
 
 ---
 
@@ -23,9 +23,15 @@ Each project can have a cover image prepended to the exported CBZ. Sources: manu
 | DB migration | `ALTER TABLE … ADD COLUMN IF NOT EXISTS` | No migration runner needed; idempotent on every launch |
 | Cover storage quality | JPEG quality 100 | Maximum fidelity — covers are the face of the CBZ |
 | Cover display | `convertFileSrc(coverPath)` directly | One image per project — no separate thumbnail needed |
-| UI — project list | Cover thumbnail leftmost on each card | |
+| UI — project list | Cover thumbnail leftmost on each card, 64×96 px (2:3) | Manga cover proportions; large enough to recognise at a glance |
+| UI — project list card | Full-card click via absolute overlay button | Cleaner than wrapping the text area in a button |
+| UI — project list card | Hover/focus driven by `has-[[data-card-trigger]:hover]` on `<li>` | Hover state lives on the interactive element, displayed on the container |
+| UI — project list card | Active state on the overlay button itself (`active:bg-foreground/5`) | `has(:active)` is unreliable in CSS; direct active class on the button is robust |
+| UI — project list card | Rename and Delete collapsed into a `⋯` menu (Foundations `Menu`) | Reduces visual clutter; individual hover buttons were noisy |
+| UI — rename | Dialog with pre-filled input (focus + select-all on open) | Inline rename broke the full-card-click model and felt fragile |
 | UI — editor | Compact thumbnail in header; click opens dialog | Minimal header real estate |
 | UI — actions | Contained in a modal dialog | Upload / Fetch from Anilist / Remove |
+| Foundations components added | `Menu`, `Popover`, `useStableCallback` copied from foundations.significa.co | Needed for the `⋯` action menu; `@floating-ui/react` was already installed |
 
 ---
 
@@ -129,9 +135,13 @@ removeProjectCover(projectId: string): Promise<void>
 ### Phase 3 — Frontend UI
 
 #### Project list card (`src/views/projects/project-list.tsx`)
-- Leftmost element: cover thumbnail (~40px wide, 2:3 aspect ratio)
-- `convertFileSrc(project.coverPath)` when set; neutral placeholder (grey rect + book icon) when unset
-- Clicking thumbnail opens `<CoverDialog>`
+- Cover thumbnail: 64×96 px (w-16 h-24, 2:3 ratio), leftmost element
+- `convertFileSrc(coverPath)` when set; neutral placeholder (grey rect + `BookImage` icon) when unset
+- Clicking the thumbnail opens `<CoverDialog>`; clicking anywhere else on the card opens the project
+- Full-card click implemented via an `absolute inset-0` overlay button (`data-card-trigger`); cover, `⋯` menu, and text are `relative z-10` siblings above it; text area is `pointer-events-none` so clicks fall through
+- Hover/focus ring on `<li>` driven by `has-[[data-card-trigger]:hover]` / `has-[[data-card-trigger]:focus-visible]`; active tint (`bg-foreground/5 transition`) on the overlay button directly
+- Rename and Delete actions moved into a `⋯` `IconButton` → `Menu` (Foundations) instead of inline buttons; rename opens a `Dialog` with a pre-filled `Input` (focused + all text selected on mount)
+- Card manages `coverPath`, `renameDialogOpen`, `deleteDialogOpen` locally
 
 #### Editor header (`src/views/editor/editor.tsx`)
 - Compact cover thumbnail (~32px tall) between back button and project name
@@ -150,14 +160,10 @@ Modal containing:
 - **Remove** (only when cover set) — `api.removeProjectCover` → `onCoverChange(null)`
 - All actions: loading state + error toast on failure
 
-#### Project list card (`src/views/projects/project-list.tsx`) — cover trigger
-- Clicking the cover thumbnail (or placeholder) on a project card opens `<CoverDialog>` for that project
-- Each card manages its own `coverPath` state locally; initialised from `project.coverPath`, updated via `onCoverChange`
-
-#### Editor header (`src/views/editor/editor.tsx`) — cover trigger
-- Compact cover thumbnail (~32px tall) between back button and project name
-- Click → open `<CoverDialog>` for the current project
-- `coverPath` state lives in `editor.tsx`; passed to dialog via `onCoverChange`
+#### New Foundations files added
+- `src/hooks/use-stable-callback.ts` — stable callback ref hook (Menu dependency)
+- `src/components/ui/popover.tsx` — floating panel primitive (Menu dependency); icons swapped from `@phosphor-icons` to `lucide-react`
+- `src/components/ui/menu.tsx` — action menu with keyboard navigation, used for the `⋯` card actions
 
 ---
 
@@ -194,6 +200,9 @@ Update `docs/rust-primer.md` with:
 | `src-tauri/src/lib.rs` | Register new commands |
 | `src/types.ts` | Extend `Project` type |
 | `src/lib/tauri.ts` | Add cover API wrappers |
-| `src/views/projects/project-list.tsx` | Cover thumbnail on card |
+| `src/views/projects/project-list.tsx` | Full card redesign — larger cover, overlay click, `⋯` menu, rename dialog |
 | `src/views/editor/editor.tsx` | Compact cover in header |
 | `src/components/cover-dialog.tsx` | New — shared cover dialog (project list + editor) |
+| `src/hooks/use-stable-callback.ts` | New — Foundations hook (Menu dependency) |
+| `src/components/ui/popover.tsx` | New — Foundations Popover (Menu dependency) |
+| `src/components/ui/menu.tsx` | New — Foundations Menu (card `⋯` actions) |
