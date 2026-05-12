@@ -24,7 +24,7 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
       aria-label="Change cover"
       className={cn(
         'focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden outline-none ring-ring focus-visible:ring-inset',
-        size === 'sm' ? 'rounded' : 'h-full w-16',
+        size === 'sm' ? 'rounded' : 'h-full w-16 rounded-lg',
         className,
       )}
       onClick={onClick}

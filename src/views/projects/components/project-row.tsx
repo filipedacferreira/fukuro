@@ -197,7 +197,7 @@ export const ProjectRow: FC<ProjectRowProps> = ({
 
   return (
     <>
-      <li className="group has-[[data-card-trigger]:focus-visible]:ring-(length:--ring-width) relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-background px-3 py-3 ring-ring transition has-[[data-card-trigger]:hover]:bg-background-secondary has-[[data-card-trigger]:focus-visible]:ring-inset">
+      <li className="group has-[[data-card-trigger]:focus-visible]:ring-(length:--ring-width) relative flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-3 ring-ring transition has-[[data-card-trigger]:hover]:bg-background-secondary has-[[data-card-trigger]:focus-visible]:ring-inset">
         <button
           type="button"
           data-card-trigger
@@ -206,8 +206,8 @@ export const ProjectRow: FC<ProjectRowProps> = ({
           onClick={() => onOpen({ ...project, name: localName, ...cover })}
         />
 
-        {/* Cover thumbnail — sits above overlay via z-10; bleeds to card edges */}
-        <div className="relative z-10 -my-3 -ml-3 shrink-0 self-stretch">
+        {/* Cover thumbnail — sits above overlay via z-10 */}
+        <div className="relative z-10 shrink-0 self-stretch">
           <CoverThumbnail
             coverPath={cover.coverPath}
             coverVersion={coverVersion}
