@@ -23,7 +23,8 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
       type="button"
       aria-label="Change cover"
       className={cn(
-        'focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden rounded outline-none ring-ring focus-visible:ring-inset',
+        'focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden outline-none ring-ring focus-visible:ring-inset',
+        size === 'sm' ? 'rounded' : 'h-full w-16',
         className,
       )}
       onClick={onClick}
@@ -34,14 +35,14 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
           alt="Cover"
           className={cn(
             'object-cover',
-            size === 'sm' ? 'h-8 w-auto rounded' : 'h-24 w-16 rounded-lg',
+            size === 'sm' ? 'h-8 w-auto rounded' : 'h-full w-full',
           )}
         />
       ) : (
         <div
           className={cn(
             'flex items-center justify-center bg-background-secondary',
-            size === 'sm' ? 'h-8 w-6 rounded' : 'h-24 w-16 rounded-lg',
+            size === 'sm' ? 'h-8 w-6 rounded' : 'h-full w-full',
           )}
         >
           <BookImage
