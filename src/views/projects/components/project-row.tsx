@@ -49,7 +49,7 @@ const ProjectRenameDialog: FC<ProjectRenameDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <Dialog.Content className="w-80">
+      <Dialog.Content className="w-96">
         <Dialog.Title>Rename project</Dialog.Title>
         <form
           onSubmit={handleSubmit(onSubmit)}
@@ -95,8 +95,8 @@ const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
   onDelete,
 }) => (
   <Dialog open={open} onOpenChange={onOpenChange}>
-    <Dialog.Content className="w-80">
-      <Dialog.Title>Delete &ldquo;{name}&rdquo;?</Dialog.Title>
+    <Dialog.Content className="w-96">
+      <Dialog.Title className="break-words">Delete &ldquo;{name}&rdquo;?</Dialog.Title>
       <Dialog.Description>
         This removes the project from fukuro. Your manga files won't be deleted.
       </Dialog.Description>
