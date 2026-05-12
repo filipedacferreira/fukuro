@@ -1,5 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Channel } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
+import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { Archive, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -13,7 +16,7 @@ import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
 import type { RenameValues } from '@/lib/validation'
 import { renameSchema } from '@/lib/validation'
-import type { CoverInfo, Project } from '@/types'
+import type { CoverInfo, ExportEvent, Project } from '@/types'
 
 interface ProjectRenameDialogProps {
   open: boolean
@@ -125,6 +128,7 @@ export const ProjectRow: FC<ProjectRowProps> = ({
   onRename,
 }) => {
   const [localName, setLocalName] = useState(project.name)
+  const [exporting, setExporting] = useState(false)
   const [cover, setCover] = useState<CoverInfo>({
     coverPath: project.coverPath,
     anilistId: project.anilistId,
@@ -140,6 +144,41 @@ export const ProjectRow: FC<ProjectRowProps> = ({
     undefined,
     { year: 'numeric', month: 'short', day: 'numeric' },
   )
+
+  const handleExport = async () => {
+    const outputPath = await save({
+      filters: [{ name: 'Comic Book Archive', extensions: ['cbz'] }],
+      defaultPath: `${localName}.cbz`,
+    })
+    if (!outputPath) return
+
+    setExporting(true)
+    const path = outputPath as string
+    const channel = new Channel<ExportEvent>()
+    channel.onmessage = (event) => {
+      if (event.type === 'done') {
+        setExporting(false)
+        toast({
+          title: 'CBZ created',
+          description: path,
+          action: {
+            label: 'Show in folder',
+            onClick: () => revealItemInDir(path),
+          },
+        })
+      } else if (event.type === 'error') {
+        setExporting(false)
+        toast({ title: 'Export failed', description: event.message })
+      }
+    }
+
+    try {
+      await api.createCbz(project.id, path, channel)
+    } catch (e) {
+      setExporting(false)
+      toast({ title: 'Export failed', description: String(e) })
+    }
+  }
 
   const commit = async ({ name }: RenameValues) => {
     try {
@@ -206,6 +245,10 @@ export const ProjectRow: FC<ProjectRowProps> = ({
               <Menu.Item onSelect={() => setRenameDialogOpen(true)}>
                 <Pencil className="size-4" />
                 Rename
+              </Menu.Item>
+              <Menu.Item onSelect={handleExport} disabled={exporting}>
+                <Archive className="size-4" />
+                Export CBZ
               </Menu.Item>
               <Menu.Divider />
               <Menu.Item
