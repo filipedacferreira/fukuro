@@ -96,7 +96,9 @@ const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
 }) => (
   <Dialog open={open} onOpenChange={onOpenChange}>
     <Dialog.Content className="w-96">
-      <Dialog.Title className="break-words">Delete &ldquo;{name}&rdquo;?</Dialog.Title>
+      <Dialog.Title className="break-words">
+        Delete &ldquo;{name}&rdquo;?
+      </Dialog.Title>
       <Dialog.Description>
         This removes the project from fukuro. Your manga files won't be deleted.
       </Dialog.Description>
