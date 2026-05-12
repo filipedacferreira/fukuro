@@ -155,6 +155,8 @@ Format: `feat(context): message` — one line, no description, no co-authoring.
 
 Split changes into multiple logical commits, each covering a single concern (e.g. DB schema, Rust commands, frontend feature, tooling, docs). Never bundle unrelated changes into one commit.
 
+**Never commit without explicit approval.** Do not run `git commit` unless the user explicitly says to commit, or you have asked and received clear confirmation. Finishing a task does not imply approval to commit.
+
 ## Development
 
 Requires Rust (via rustup) and Node.js.
