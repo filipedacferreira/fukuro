@@ -12,11 +12,13 @@ import type { ExportEvent } from '@/types'
 
 interface ExportPanelProps {
   projectId: string
+  projectName: string
   hasChapters: boolean
 }
 
 export const ExportPanel: FC<ExportPanelProps> = ({
   projectId,
+  projectName,
   hasChapters,
 }) => {
   const [progress, setProgress] = useState<{
@@ -29,7 +31,7 @@ export const ExportPanel: FC<ExportPanelProps> = ({
   const handleExport = async () => {
     const outputPath = await save({
       filters: [{ name: 'Comic Book Archive', extensions: ['cbz'] }],
-      defaultPath: 'manga.cbz',
+      defaultPath: `${projectName}.cbz`,
     })
     if (!outputPath) return
 
