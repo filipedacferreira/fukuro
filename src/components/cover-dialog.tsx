@@ -223,7 +223,7 @@ export const CoverDialog: FC<CoverDialogProps> = ({
                 Fetched from Anilist ·{' '}
                 <button
                   type="button"
-                  className="cursor-pointer text-foreground underline-offset-2 hover:underline"
+                  className="align-baseline cursor-pointer text-foreground underline-offset-2 hover:underline"
                   onClick={() =>
                     openUrl(`https://anilist.co/manga/${localAnilistId}`)
                   }
