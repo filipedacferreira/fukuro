@@ -16,7 +16,6 @@ interface ProjectListProps {
 export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
-  const [opening, setOpening] = useState(false)
 
   useEffect(() => {
     api
@@ -32,7 +31,6 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
   }, [])
 
   const handleOpenFolder = async () => {
-    setOpening(true)
     try {
       const selected = await open({
         directory: true,
@@ -48,8 +46,6 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         title: 'Failed to open folder',
         description: String(e),
       })
-    } finally {
-      setOpening(false)
     }
   }
 
@@ -80,7 +76,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
           <span className="text-base leading-none">梟</span>
           <h1 className="font-semibold text-base">Fukurō</h1>
         </div>
-        <Button onClick={handleOpenFolder} isLoading={opening} size="sm">
+        <Button onClick={handleOpenFolder} size="sm">
           <FolderOpen className="size-4" />
           Open folder
         </Button>
@@ -91,11 +87,11 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: static-length skeleton list
-              <Skeleton key={i} className="h-[88px] w-full rounded-xl" />
+              <Skeleton key={i} className="h-22 w-full rounded-xl" />
             ))}
           </div>
         ) : projects.length === 0 ? (
-          <EmptyState onOpen={handleOpenFolder} opening={opening} />
+          <EmptyState onOpen={handleOpenFolder} />
         ) : (
           <ul className="space-y-2">
             {projects.map((project) => (
@@ -116,11 +112,10 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
 
 interface EmptyStateProps {
   onOpen: () => void
-  opening: boolean
 }
 
-const EmptyState: FC<EmptyStateProps> = ({ onOpen, opening }) => (
-  <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-4 text-center">
+const EmptyState: FC<EmptyStateProps> = ({ onOpen }) => (
+  <div className="flex h-full min-h-100 flex-col items-center justify-center gap-4 text-center">
     <div className="rounded-2xl border border-border bg-background-secondary p-6">
       <span className="text-5xl text-foreground-secondary leading-none">
         梟
@@ -132,7 +127,7 @@ const EmptyState: FC<EmptyStateProps> = ({ onOpen, opening }) => (
         Open a folder containing chapter subfolders to get started.
       </p>
     </div>
-    <Button onClick={onOpen} isLoading={opening} variant="outline">
+    <Button onClick={onOpen} variant="outline">
       <FolderOpen className="size-4" />
       Open a manga folder
     </Button>
