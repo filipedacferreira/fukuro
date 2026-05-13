@@ -172,6 +172,19 @@ pnpm check       # biome check (lint + format, no writes)
 
 After making frontend changes, run `pnpm format` to auto-fix lint/format issues, then `pnpm check` to confirm no remaining violations.
 
+## Tailwind class conventions
+
+Always prefer canonical Tailwind classes over arbitrary-value syntax when a canonical form exists. Common cases:
+
+| ❌ Arbitrary | ✅ Canonical |
+|---|---|
+| `aspect-[2/3]` | `aspect-2/3` |
+| `rounded-[4px]` | `rounded` / `rounded-sm` / etc. |
+| `inset-[0]` | `inset-0` |
+| `opacity-[0.5]` | `opacity-50` |
+
+When writing Tailwind classes, reach for the canonical scale-based class first. Only use `[arbitrary]` syntax when no canonical class covers the value.
+
 ## Component conventions
 
 Components inside `src/views/` (and their `components/` subfolders) must use the arrow function + `FC` pattern:
