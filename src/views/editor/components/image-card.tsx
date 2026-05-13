@@ -23,7 +23,7 @@ export const ImageCard: FC<ImageCardProps> = ({
 
   return (
     <div>
-      <div className="group/card relative transition-transform duration-150 has-[[data-image-toggle]:active]:scale-[0.98]">
+      <div className="group/card relative transition-transform duration-150 will-change-transform has-[[data-image-toggle]:active]:scale-0.98">
         <button
           type="button"
           data-image-toggle
@@ -41,7 +41,7 @@ export const ImageCard: FC<ImageCardProps> = ({
             width={200}
             height={300}
             className={cn(
-              'aspect-[2/3] w-full object-cover transition-[filter] duration-300',
+              'aspect-2/3 w-full object-cover transition-[filter] duration-300',
               optimizing && 'blur-sm',
             )}
             loading="lazy"

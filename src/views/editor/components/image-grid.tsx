@@ -113,7 +113,7 @@ export const ImageGrid: FC<ImageGridProps> = ({
         {Array.from({ length: imageCount }).map((_, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static-length skeleton list
           <div key={i}>
-            <Skeleton className="aspect-[2/3] rounded-lg" />
+            <Skeleton className="aspect-2/3 rounded-lg" />
             <Skeleton className="mx-auto mt-1 h-3 w-3/4 rounded" />
           </div>
         ))}
