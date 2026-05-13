@@ -219,11 +219,11 @@ export const CoverDialog: FC<CoverDialogProps> = ({
             </form>
             <Field.Error>{errors.anilistId?.message}</Field.Error>
             {(localCoverTitle || localAnilistId) && !errors.anilistId && (
-              <Field.Description>
-                Fetched from Anilist ·{' '}
+              <Field.Description className="flex flex-col gap-0.5">
+                <span>Fetched from Anilist:</span>
                 <button
                   type="button"
-                  className="cursor-pointer align-baseline text-foreground underline-offset-2 hover:underline"
+                  className="cursor-pointer text-start text-foreground underline-offset-2 hover:underline"
                   onClick={() =>
                     openUrl(`https://anilist.co/manga/${localAnilistId}`)
                   }
