@@ -96,7 +96,7 @@ const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
 }) => (
   <Dialog open={open} onOpenChange={onOpenChange}>
     <Dialog.Content className="w-96">
-      <Dialog.Title className="break-words">
+      <Dialog.Title className="wrap-break-word">
         Delete &ldquo;{name}&rdquo;?
       </Dialog.Title>
       <Dialog.Description>
@@ -220,7 +220,10 @@ export const ProjectRow: FC<ProjectRowProps> = ({
         <div className="pointer-events-none relative z-10 min-w-0 flex-1">
           <div className="flex flex-col gap-0.5">
             <span className="truncate font-medium">{localName}</span>
-            <span className="truncate text-foreground-secondary text-xs">
+            <span
+              title={project.rootPath}
+              className="max-w-1/2 truncate text-foreground-secondary text-xs"
+            >
               {project.rootPath}
             </span>
             <span className="text-foreground-secondary text-xs">
