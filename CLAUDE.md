@@ -69,6 +69,7 @@ src-tauri/src/
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
     export.rs                     # create_cbz
     cover.rs                      # set_project_cover, fetch_anilist_cover, remove_project_cover
+    watch.rs                      # start_watching_project, stop_watching_project
 ```
 
 ## Database
@@ -91,11 +92,11 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 
 | Command | Description |
 |---|---|
-| `create_project(rootPath)` | Scan folder for subdirs, create project + chapters in DB |
+| `create_project(rootPath)` | Scan folder for subdirs, create project + chapters in DB. If a project already exists for that `rootPath`, reuses it (rescanning for new subdirs) instead of inserting a duplicate |
 | `list_projects()` | Return projects ordered by `created_at DESC` |
 | `delete_project(id)` | Cascade delete (chapters + exclusions) |
 | `rename_project(id, name)` | Update project display name |
-| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them |
+| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, and deletes chapters whose folder no longer exists |
 | `reorder_chapters(chapterIds[])` | Bulk update `sort_order` after drag-drop |
 | `rename_chapter(id, name)` | Update `display_name` |
 | `get_chapter_images(chapterId)` | FS read + natural sort, with `isExcluded` and `thumbnailPath` |
@@ -107,6 +108,8 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100, store in `{AppData}/covers/`, update DB |
 | `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, re-encode and store; returns `{ title, coverPath }` |
 | `remove_project_cover(projectId)` | Delete cover file and clear `cover_path`/`anilist_id` in DB |
+| `start_watching_project(projectId)` | Watches the project's `root_path` (non-recursive) for chapter subfolders being added or removed while the editor is open; replaces any previously active watcher. On a filesystem `Create`/`Remove` event, rescans: inserts new chapters and deletes chapters whose folder no longer exists (no confirmation — the deletion already happened on disk), then emits a `chapters-updated` event with the project id |
+| `stop_watching_project()` | Stops the active watcher, if any |
 
 ## Thumbnail cache
 

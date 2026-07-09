@@ -385,6 +385,51 @@ Key points:
 
 ---
 
+## `notify` — filesystem watching from a background thread
+
+`commands/watch.rs` watches a project's root folder for chapter subfolders being added or removed while the editor is open, so downloading new chapters (or deleting old ones) doesn't require re-importing the project.
+
+```rust
+let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+    // runs on notify's own background thread whenever the watched path changes
+})
+.map_err(|e| e.to_string())?;
+
+watcher.watch(Path::new(&root_path), RecursiveMode::NonRecursive)?;
+```
+
+`notify::recommended_watcher` picks the best backend for the current OS (on Windows, `ReadDirectoryChangesW`) and runs it on a thread it manages internally — there's no `std::thread::spawn` here, unlike the thumbnail/export streaming commands. The closure you pass is the event handler, called once per filesystem event.
+
+**Getting state into the handler closure**
+
+The handler closure isn't a `#[tauri::command]`, so Tauri can't inject `AppHandle` or `State` into it the normal way. Instead, clone what you need from the surrounding command *before* the closure and `move` the clones in:
+
+```rust
+let app_for_handler = app.clone();
+let project_id_for_handler = project_id.clone();
+```
+
+`AppHandle` is cheap to clone (it's a handle, not the app itself) and `Send + Sync`, so it's safe to hand a clone to notify's background thread. Inside the closure, `app_for_handler.state::<DbState>()` fetches the same managed state that `tauri::State<DbState>` would inject into a command.
+
+**Keeping the watcher alive — and stopping it**
+
+A `RecommendedWatcher` stops watching the moment it's dropped. That's the mechanism this codebase uses for teardown: `WatcherState` holds `Mutex<Option<RecommendedWatcher>>`, and both "switch to watching a different project" and "stop watching" just assign a new value into that `Option` — the old watcher (if any) is dropped as part of the assignment, which stops it:
+
+```rust
+let mut guard = watcher_state.0.lock().map_err(|e| e.to_string())?;
+*guard = Some(watcher); // replaces (and thus drops/stops) any previous watcher
+```
+
+```rust
+*guard = None; // drops the watcher, stopping it — used by stop_watching_project
+```
+
+**Deduplicating events**
+
+Filesystem watchers commonly fire multiple events for a single logical change (e.g. `Create` followed by a `Modify` as the OS finishes writing metadata), and notify's Windows backend reports generic `Create(CreateKind::Any)` / `Remove(RemoveKind::Any)` rather than distinguishing files from folders. Rather than trying to parse event details precisely, the handler just re-runs the same rescan logic used by `get_project_chapters`: `insert_new_chapters` adds any subfolder not yet in the DB, and `remove_missing_chapters` deletes any chapter whose `folder_path` no longer exists on disk. Both dedupe against actual DB/disk state, so redundant events end up as no-op rescans — and deleting a chapter folder outside the app removes it from the project automatically (no confirmation prompt, since the deletion already happened on disk).
+
+---
+
 ## Practical reading order
 
 If you want to trace a full request through the stack, follow this path:

@@ -49,8 +49,8 @@ When a project's `root_path` or a chapter's `folder_path` no longer exists on di
 
 **What this does not cover**
 
-- Real-time file watching (not needed — recovery on next open is sufficient)
-- Chapters whose subfolder was deleted (not renamed) — flagged as missing in the chapter list with a **Remove** button that deletes the chapter record (and its exclusions) from the DB; no auto-removal
+- Chapters whose subfolder was deleted (not renamed) — already handled outside this feature: the folder watcher (see removed "Watch folder" item) and `get_project_chapters` both remove chapters whose `folder_path` no longer exists automatically, no confirmation prompt
+- Real-time watching of the *root* path itself disappearing (covered by the "detect on load" approach above, not by the watcher, since a missing root can't be watched)
 
 ### Developer mode
 
@@ -216,19 +216,6 @@ A project is considered outdated on the device when `last_exported_at > last_syn
 **UI copy**
 
 Use device-neutral language throughout: **Send to device**, **Sync**, **Up to date**, **Outdated** — never Finder/Explorer-specific terms.
-
-### Watch folder
-
-While the editor is open, detect new subfolders added to the project's `root_path` and insert them as chapters automatically.
-
-**Approach**
-
-- Use the [`notify`](https://crates.io/crates/notify) crate to set up a recursive watcher on `root_path` when `get_project_chapters` is first called
-- On a `Create(Dir)` event, run the same new-subdir insertion logic already used in `get_project_chapters`
-- Emit a Tauri event to the frontend (`chapters-updated`) so the chapter list refreshes without a manual reload
-- Watcher is torn down only when the project is closed — not on window focus loss, since the user is likely alt-tabbing to their file manager to add folders
-- Duplicate `Create(Dir)` events for the same path (common with the `notify` crate due to filesystem buffering) are deduplicated in the handler before inserting: check if a chapter with that `folder_path` already exists, skip if so
-- A newly created empty subfolder is inserted as a chapter with `image_count = 0`; this is intentional and consistent with how `get_project_chapters` handles empty directories
 
 ---
 
