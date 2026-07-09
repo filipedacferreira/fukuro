@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event'
 import { ArrowLeft } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { FC } from 'react'
@@ -40,6 +41,29 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
         }),
       )
       .finally(() => setLoading(false))
+  }, [project.id])
+
+  // Watch the project's root folder for new chapter subfolders while the editor is
+  // open (e.g. new chapters downloaded into the same folder). The watcher is torn
+  // down on unmount/project switch, not on window focus loss, since the user is
+  // likely alt-tabbing to their file manager to add folders.
+  useEffect(() => {
+    api.startWatchingProject(project.id).catch((e) =>
+      toast({
+        title: 'Failed to watch project folder',
+        description: String(e),
+      }),
+    )
+
+    const unlisten = listen<string>('chapters-updated', (event) => {
+      if (event.payload !== project.id) return
+      api.getProjectChapters(project.id).then(setChapters)
+    })
+
+    return () => {
+      unlisten.then((fn) => fn())
+      api.stopWatchingProject().catch(() => {})
+    }
   }, [project.id])
 
   const handleReorder = async (newChapters: Chapter[]) => {

@@ -26,3 +26,4 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 rayon = "1"
 fast_image_resize = "4"
 reqwest = { version = "0.12", features = ["json"] }
+notify = "6"

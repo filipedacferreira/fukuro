@@ -39,6 +39,10 @@ pub fn run() {
             // Any command that declares `state: tauri::State<DbState>` gets this injected.
             app.manage(DbState(Mutex::new(conn)));
 
+            // Holds the active folder watcher (see commands/watch.rs). Starts empty —
+            // watching begins only once a project is opened in the editor.
+            app.manage(commands::watch::WatcherState(Mutex::new(None)));
+
             // Build the native OS menu bar.
             let menu = MenuBuilder::new(app)
                 .item(
@@ -114,6 +118,8 @@ pub fn run() {
             commands::cover::set_project_cover,
             commands::cover::fetch_anilist_cover,
             commands::cover::remove_project_cover,
+            commands::watch::start_watching_project,
+            commands::watch::stop_watching_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

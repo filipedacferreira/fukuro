@@ -61,4 +61,9 @@ export const api = {
 
   removeProjectCover: (projectId: string) =>
     invoke<void>('remove_project_cover', { projectId }),
+
+  startWatchingProject: (projectId: string) =>
+    invoke<void>('start_watching_project', { projectId }),
+
+  stopWatchingProject: () => invoke<void>('stop_watching_project'),
 }
