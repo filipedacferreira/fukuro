@@ -243,13 +243,16 @@ let stem = Path::new(&filename).file_stem().unwrap_or_default().to_string_lossy(
 ## `pub` vs no `pub` — what's visible where
 
 ```rust
-pub fn is_image_file(...)   // callable from other modules (projects.rs uses this)
-fn ensure_thumbnail(...)    // private to images.rs
-pub struct ImageMeta { ... }  // type visible to the whole crate
-pub path: String,           // field readable outside the module
+pub fn is_image_file(...)      // callable from other modules (projects.rs uses this)
+pub fn resize_to_jpeg(...)     // callable from other modules (cover.rs uses this)
+fn covers_dir(...)             // private to cover.rs
+pub struct ImageMeta { ... }   // type visible to the whole crate
+pub path: String,              // field readable outside the module
 ```
 
-`pub` is explicit in Rust — nothing is public by default. Helper functions used only within `images.rs` have no `pub`. Structs returned from commands need `pub` so Tauri's generated code can access their fields.
+`pub` is explicit in Rust — nothing is public by default. Helper functions used only within one file have no `pub`. Structs returned from commands need `pub` so Tauri's generated code can access their fields.
+
+`resize_to_jpeg` (in `thumbnails.rs`) is a good example of sharing a helper across modules without duplicating logic: `commands::cover` calls `crate::commands::thumbnails::resize_to_jpeg(img, 200)` to build cover thumbnails, reusing the exact same downscale-and-encode routine that chapter-image thumbnails use, rather than each module rolling its own copy of the `fast_image_resize` boilerplate.
 
 ---
 

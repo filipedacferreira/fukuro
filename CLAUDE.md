@@ -79,12 +79,12 @@ SQLite at `{AppData}/fukuro.db`.
 
 ```sql
 settings       (key, value)  -- key-value store; currently one row, key='library_root'
-projects       (id, root_path, name, created_at, cover_path, anilist_id)
+projects       (id, root_path, name, created_at, cover_path, cover_thumbnail_path, anilist_id, cover_title)
 chapters       (id, project_id→projects, folder_path, display_name, sort_order, image_count)
 excluded_images(chapter_id→chapters, image_path)  -- soft-delete exclusions
 ```
 
-`cover_path` and `anilist_id` are nullable — added via `ALTER TABLE` migration in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`).
+`cover_path`, `cover_thumbnail_path`, `anilist_id`, and `cover_title` are nullable — added via `ALTER TABLE` migrations in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`).
 
 The `settings` table's presence also gates a one-time fresh-reset migration: databases from before the single-library-root rearchitecture (no `settings` table) have their `projects`/`chapters`/`excluded_images` tables dropped on next launch rather than migrated in place, since old projects each had an independently-picked `root_path` that the new "one watched root, auto-scanned" model can't reconcile. Everything is rebuilt from disk once the user (re-)configures a library root.
 
@@ -110,9 +110,9 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `generate_chapter_thumbnails_stream(chapterId, onEvent)` | Spawns background thread; generates thumbnails in parallel via rayon and streams `ThumbnailUpdate` events through a Tauri Channel |
 | `clear_thumbnail_cache()` | Deletes `{AppData}/thumbnails/` entirely (dev menu action) |
 | `create_cbz(projectId, outputPath, onEvent)` | Zip all non-excluded images in chapter/page order; streams `progress` / `done` / `error` events via Channel; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
-| `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100, store in `{AppData}/covers/`, update DB |
-| `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, re-encode and store; returns `{ title, coverPath }` |
-| `remove_project_cover(projectId)` | Delete cover file and clear `cover_path`/`anilist_id` in DB |
+| `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100 into `{AppData}/covers/`, plus a 200px-wide thumbnail into `{AppData}/covers/thumbnails/`, update DB; returns `{ coverPath, coverThumbnailPath }` |
+| `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, store the master untouched (already JPEG) plus a re-encoded 200px-wide thumbnail; returns `{ title, coverPath, coverThumbnailPath }` |
+| `remove_project_cover(projectId)` | Delete cover + thumbnail files and clear `cover_path`/`cover_thumbnail_path`/`anilist_id`/`cover_title` in DB |
 
 `start_library_watcher` (in `watch.rs`) is not an invokable command — it's a plain function called from `lib.rs`'s `setup()` at launch (if a library root is already configured) and from `set_library_root` whenever the root changes. It watches the entire library root recursively for the whole app session (both the manga level and the chapter level — see `docs/rust-primer.md`'s `notify` entry for how one recursive watch is scoped back to those two levels), replacing any previously active watcher. On a relevant `Create`/`Remove` event it rescans the affected level and emits either `projects-updated` (payload: the fresh `Project[]`) or `chapters-updated` (payload: the affected project id) — no confirmation, since the filesystem change already happened.
 
@@ -125,6 +125,8 @@ Generated on first expand of each chapter, cached across sessions.
 - **Encoding:** JPEG quality 75
 - **Algorithm:** bilinear via `fast_image_resize` (SIMD), parallel workers via `rayon`
 - **Lifecycle:** created by `generate_chapter_thumbnails_stream`, invalidated individually by `hard_delete_image`, wiped entirely via **Tools → Clear Thumbnail Cache** in the native menu bar
+
+Project covers have their own parallel thumbnail, since `cover_path` is the master file embedded verbatim as page 0000 in CBZ exports and can't be downscaled: `cover.rs` writes a 200px-wide `cover_thumbnail_path` into `{AppData}/covers/thumbnails/{project_id}.jpg` eagerly (not lazily/streamed like chapter thumbnails, since there's only one cover per project) whenever the cover is set or fetched, sharing the same resize routine (`resize_to_jpeg` in `thumbnails.rs`) as chapter thumbnails. `CoverThumbnail` renders `coverThumbnailPath`, falling back to the full-res `coverPath` for any project whose cover predates this cache.
 
 ### ImageGrid flow
 
