@@ -1,9 +1,11 @@
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
+use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+use crate::commands::settings::read_library_root;
 use crate::db::DbState;
 use crate::utils::{is_image_file, normalize_path};
 
@@ -51,157 +53,9 @@ fn count_images_in_dir(dir: &Path) -> i64 {
         .unwrap_or(0) // if the directory can't be read, return 0 rather than crashing
 }
 
-// Scans the selected root folder for subdirectories, creates a project in the DB,
-// and inserts one chapter row per subdirectory.
-// The initial sort_order is alphabetical by folder name — a sensible first guess.
-#[tauri::command]
-pub fn create_project(
-    root_path: String,
-    state: tauri::State<DbState>,
-) -> Result<Project, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-
-    let root = Path::new(&root_path);
-    if !root.is_dir() {
-        return Err(format!("Not a directory: {}", root_path));
-    }
-
-    // If this folder was already imported, reuse that project instead of inserting a
-    // duplicate — otherwise picking the same folder again (e.g. after downloading new
-    // chapters into it) would create a second project pointing at the same files.
-    // Paths are stored with native separators, so we can't filter by normalised path in
-    // SQL; scan in Rust instead — project counts are small enough that this is cheap.
-    let normalized_root = normalize_path(root);
-    let all_projects: Vec<(String, String)> = {
-        let mut stmt = conn
-            .prepare("SELECT id, root_path FROM projects")
-            .map_err(|e| e.to_string())?;
-        let result: Vec<(String, String)> = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-        result
-    };
-    let existing_id = all_projects
-        .into_iter()
-        .find(|(_, path)| normalize_path(Path::new(path)) == normalized_root)
-        .map(|(id, _)| id);
-
-    if let Some(project_id) = existing_id {
-        // Rescan for any new subfolders (e.g. freshly downloaded chapters) and drop
-        // chapters whose folder no longer exists, before returning — so reopening an
-        // existing project's folder reflects the current state of the disk immediately.
-        insert_new_chapters(&conn, &project_id, &root_path)?;
-        remove_missing_chapters(&conn, &project_id)?;
-
-        let mut stmt = conn
-            .prepare(
-                "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
-                        p.cover_path, p.anilist_id, p.cover_title
-                 FROM projects p
-                 LEFT JOIN chapters c ON c.project_id = p.id
-                 WHERE p.id = ?1
-                 GROUP BY p.id",
-            )
-            .map_err(|e| e.to_string())?;
-        return stmt
-            .query_row(params![project_id], |row| {
-                Ok(Project {
-                    id: row.get(0)?,
-                    root_path: row.get(1)?,
-                    name: row.get(2)?,
-                    created_at: row.get(3)?,
-                    chapter_count: row.get(4)?,
-                    cover_path: row.get(5)?,
-                    anilist_id: row.get(6)?,
-                    cover_title: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string());
-    }
-
-    // Derive the project name from the folder name (the last segment of the path).
-    let name = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Unknown")
-        .to_string();
-
-    // Uuid::new_v4() generates a random unique ID — no collision risk.
-    let project_id = Uuid::new_v4().to_string();
-
-    // Unix timestamp in seconds — used for "created_at" ordering on the home screen.
-    let created_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-
-    conn.execute(
-        "INSERT INTO projects (id, root_path, name, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![project_id, root_path, name, created_at],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Collect all immediate subdirectories and sort them by name.
-    let mut entries: Vec<_> = std::fs::read_dir(root)
-        .map_err(|e| e.to_string())?
-        // filter_map(|e| e.ok()) combines filter + map: it calls e.ok() on each item,
-        // keeps only the Some(...) results, and unwraps them. Items that return None
-        // (e.g. entries we don't have permission to read) are silently skipped.
-        .filter_map(|e| e.ok())
-        // file_type() returns a Result, so we map it to a bool and default to false
-        // if it fails — this silently excludes entries whose type we can't determine.
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .collect();
-
-    entries.sort_by_key(|e| e.file_name());
-
-    // Insert one chapter row per subdirectory.
-    for (i, entry) in entries.iter().enumerate() {
-        // Normalise to forward slashes so paths are consistent across Windows and macOS.
-        let folder_path = normalize_path(&entry.path());
-        let display_name = entry.file_name().to_string_lossy().to_string();
-        let chapter_id = Uuid::new_v4().to_string();
-        let image_count = count_images_in_dir(&entry.path());
-
-        conn.execute(
-            "INSERT INTO chapters (id, project_id, folder_path, display_name, sort_order, image_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![chapter_id, project_id, folder_path, display_name, i as i64, image_count],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    // Count the inserted chapters to return an accurate `chapterCount` to the frontend.
-    let chapter_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM chapters WHERE project_id = ?1",
-            params![project_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    Ok(Project {
-        id: project_id,
-        root_path,
-        name,
-        created_at,
-        chapter_count,
-        cover_path: None,
-        anilist_id: None,
-        cover_title: None,
-    })
-}
-
-// Returns all projects ordered newest-first.
-// Uses a LEFT JOIN so projects with zero chapters still appear.
-#[tauri::command]
-pub fn list_projects(state: tauri::State<DbState>) -> Result<Vec<Project>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-
+// Shared SELECT behind both `list_projects` and `set_library_root` — factors out the
+// join/count query so it's written once instead of duplicated at every call site.
+pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
@@ -237,13 +91,58 @@ pub fn list_projects(state: tauri::State<DbState>) -> Result<Vec<Project>, Strin
     Ok(projects)
 }
 
-// Deletes a project row. The DB schema has ON DELETE CASCADE, so all related
-// chapters and excluded_images rows are automatically removed too.
+// Returns all projects, rescanning the configured library root first so the list always
+// reflects the current state of disk (mirrors the rescan-on-read pattern `get_project_chapters`
+// already uses one level down for chapters). Returns an empty list if no library root has
+// been configured yet — the frontend shows the onboarding empty state in that case.
 #[tauri::command]
-pub fn delete_project(id: String, state: tauri::State<DbState>) -> Result<(), String> {
+pub fn list_projects(
+    state: tauri::State<DbState>,
+    app_handle: tauri::AppHandle,
+) -> Result<Vec<Project>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+
+    let Some(library_root) = read_library_root(&conn)? else {
+        return Ok(Vec::new());
+    };
+
+    insert_new_projects(&conn, &library_root)?;
+    remove_missing_projects(&conn, &app_handle)?;
+
+    query_all_projects(&conn)
+}
+
+// Permanently deletes a manga: removes its folder (and everything in it) from disk, then
+// its DB row (cascading to chapters/excluded_images). A DB-only delete would just be
+// undone by the next rescan/watch event, since the folder would still exist under the
+// watched library root — so this mirrors `hard_delete_image`'s permanent-delete behaviour
+// one level up.
+//
+// If the folder can't be removed (e.g. a file inside is open elsewhere), the error is
+// returned and the DB row is left untouched, so the project doesn't vanish from the list
+// while its files are still on disk.
+#[tauri::command]
+pub fn delete_project(
+    id: String,
+    state: tauri::State<DbState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+
+    let (root_path, cover_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT root_path, cover_path FROM projects WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    std::fs::remove_dir_all(&root_path).map_err(|e| e.to_string())?;
+
+    cleanup_project_assets(&conn, &app_handle, &id, cover_path.as_deref())?;
     conn.execute("DELETE FROM projects WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
@@ -262,9 +161,145 @@ pub fn rename_project(
     Ok(())
 }
 
+// Deletes a project's cached cover image and per-chapter thumbnail cache directories.
+// Called before a project's DB row is removed — whether by an explicit `delete_project`,
+// by `remove_missing_projects` noticing its folder vanished, or by `set_library_root`
+// wiping out projects that belonged to the previous root — so AppData doesn't accumulate
+// files for projects that no longer exist in the DB.
+pub(crate) fn cleanup_project_assets(
+    conn: &Connection,
+    app_handle: &AppHandle,
+    project_id: &str,
+    cover_path: Option<&str>,
+) -> Result<(), String> {
+    if let Some(cover_path) = cover_path {
+        let _ = std::fs::remove_file(cover_path); // ignore error if already gone
+    }
+
+    let chapter_ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT id FROM chapters WHERE project_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<String> = stmt
+            .query_map(params![project_id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        for chapter_id in chapter_ids {
+            let thumb_dir = data_dir.join("thumbnails").join(chapter_id);
+            let _ = std::fs::remove_dir_all(thumb_dir); // ignore error if already gone
+        }
+    }
+
+    Ok(())
+}
+
+// Scans the library root's immediate subdirectories not yet in the DB and inserts them
+// as projects (mangas), each with its own chapters scanned immediately — a manga folder
+// can already contain chapter subfolders the first time we see it (e.g. it existed on
+// disk before the library root was configured, or was just copied in wholesale).
+// Shared by `list_projects` (rescan on read) and the library watcher in `watch.rs`
+// (rescan on filesystem change). Returns whether any projects were inserted, so callers
+// can decide whether to notify the frontend.
+pub(crate) fn insert_new_projects(conn: &Connection, library_root: &str) -> Result<bool, String> {
+    // Collect the root_paths of projects already in the DB into a HashSet for O(1) lookup.
+    let existing: HashSet<String> = {
+        let mut stmt = conn
+            .prepare("SELECT root_path FROM projects")
+            .map_err(|e| e.to_string())?;
+        let result: HashSet<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .map(|p: String| normalize_path(Path::new(&p)))
+            .collect();
+        result
+    };
+
+    // Find subdirectories on disk that aren't in the DB yet.
+    let mut new_dirs: Vec<_> = std::fs::read_dir(library_root)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !existing.contains(&normalize_path(&e.path())))
+        .collect();
+    new_dirs.sort_by_key(|e| e.file_name());
+
+    let inserted_any = !new_dirs.is_empty();
+
+    for entry in &new_dirs {
+        let root_path = normalize_path(&entry.path());
+        let name = entry.file_name().to_string_lossy().to_string();
+        let project_id = Uuid::new_v4().to_string();
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        conn.execute(
+            "INSERT INTO projects (id, root_path, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![project_id, root_path, name, created_at],
+        )
+        .map_err(|e| e.to_string())?;
+
+        insert_new_chapters(conn, &project_id, &root_path)?;
+    }
+
+    Ok(inserted_any)
+}
+
+// Deletes projects whose root_path no longer exists on disk, cleaning up their cached
+// cover/thumbnails first. The DB schema's ON DELETE CASCADE takes care of that project's
+// chapters and excluded_images rows. Shared by `list_projects` (rescan on read) and the
+// library watcher in `watch.rs` (rescan on filesystem change), mirroring
+// `insert_new_projects`. Returns whether any projects were removed, so callers can decide
+// whether to notify the frontend.
+pub(crate) fn remove_missing_projects(
+    conn: &Connection,
+    app_handle: &AppHandle,
+) -> Result<bool, String> {
+    let projects: Vec<(String, String, Option<String>)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, root_path, cover_path FROM projects")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String, Option<String>)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    let missing: Vec<(String, Option<String>)> = projects
+        .into_iter()
+        .filter(|(_, root_path, _)| !Path::new(root_path).is_dir())
+        .map(|(id, _, cover_path)| (id, cover_path))
+        .collect();
+
+    let removed_any = !missing.is_empty();
+
+    for (project_id, cover_path) in &missing {
+        cleanup_project_assets(conn, app_handle, project_id, cover_path.as_deref())?;
+        conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(removed_any)
+}
+
 // Rescans a project's root folder for subdirectories not yet in the DB and inserts
 // them as new chapters, appended after the existing ones by sort_order.
-// Shared by `get_project_chapters` (rescan on open) and the folder watcher in
+// Shared by `get_project_chapters` (rescan on open) and the library watcher in
 // `watch.rs` (rescan on filesystem change) so both paths dedupe against the DB the
 // same way. Returns whether any new chapters were inserted, so callers can decide
 // whether to notify the frontend.
@@ -339,7 +374,7 @@ pub(crate) fn insert_new_chapters(
 
 // Deletes chapters whose folder_path no longer exists on disk. The DB schema's
 // ON DELETE CASCADE takes care of that chapter's excluded_images rows too.
-// Shared by `get_project_chapters` (rescan on open) and the folder watcher in
+// Shared by `get_project_chapters` (rescan on open) and the library watcher in
 // `watch.rs` (rescan on filesystem change), mirroring `insert_new_chapters`.
 // Returns whether any chapters were removed, so callers can decide whether to
 // notify the frontend.

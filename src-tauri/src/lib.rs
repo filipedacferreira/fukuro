@@ -109,7 +109,8 @@ pub fn run() {
         // Both this registration AND the #[tauri::command] attribute on each function
         // are required — one without the other won't work.
         .invoke_handler(tauri::generate_handler![
-            commands::projects::create_project,
+            commands::settings::get_library_root,
+            commands::settings::set_library_root,
             commands::projects::list_projects,
             commands::projects::delete_project,
             commands::projects::rename_project,
@@ -125,8 +126,6 @@ pub fn run() {
             commands::cover::set_project_cover,
             commands::cover::fetch_anilist_cover,
             commands::cover::remove_project_cover,
-            commands::watch::start_watching_project,
-            commands::watch::stop_watching_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
