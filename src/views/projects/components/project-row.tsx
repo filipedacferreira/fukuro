@@ -134,6 +134,7 @@ export const ProjectRow: FC<ProjectRowProps> = ({
   const [exporting, setExporting] = useState(false)
   const [cover, setCover] = useState<CoverInfo>({
     coverPath: project.coverPath,
+    coverThumbnailPath: project.coverThumbnailPath,
     anilistId: project.anilistId,
     coverTitle: project.coverTitle,
   })
@@ -211,6 +212,7 @@ export const ProjectRow: FC<ProjectRowProps> = ({
         <div className="relative z-10 shrink-0 self-stretch">
           <CoverThumbnail
             coverPath={cover.coverPath}
+            coverThumbnailPath={cover.coverThumbnailPath}
             coverVersion={coverVersion}
             size="lg"
             onClick={() => setCoverDialogOpen(true)}

@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils/classnames'
 
 interface CoverThumbnailProps {
   coverPath: string | null
+  coverThumbnailPath: string | null
   coverVersion: number
   size: 'sm' | 'lg'
   onClick: () => void
@@ -13,11 +14,15 @@ interface CoverThumbnailProps {
 
 export const CoverThumbnail: FC<CoverThumbnailProps> = ({
   coverPath,
+  coverThumbnailPath,
   coverVersion,
   size,
   onClick,
   className,
 }) => {
+  // Fall back to the full-res master for covers set before the thumbnail cache existed —
+  // it gets backfilled the next time the cover is changed.
+  const displayPath = coverThumbnailPath ?? coverPath
   return (
     <button
       type="button"
@@ -31,9 +36,9 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
       )}
       onClick={onClick}
     >
-      {coverPath ? (
+      {displayPath ? (
         <img
-          src={`${convertFileSrc(coverPath)}?v=${coverVersion}`}
+          src={`${convertFileSrc(displayPath)}?v=${coverVersion}`}
           alt="Cover"
           className={cn(
             'object-cover',

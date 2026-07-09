@@ -79,8 +79,13 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     if (!selected) return
     setUploading(true)
     try {
-      const newPath = await api.setProjectCover(projectId, selected as string)
-      onCoverChange({ coverPath: newPath, anilistId: null, coverTitle: null })
+      const result = await api.setProjectCover(projectId, selected as string)
+      onCoverChange({
+        coverPath: result.coverPath,
+        coverThumbnailPath: result.coverThumbnailPath,
+        anilistId: null,
+        coverTitle: null,
+      })
       setLocalAnilistId(null)
       setLocalCoverTitle(null)
       toast({ title: 'Cover updated' })
@@ -102,6 +107,7 @@ export const CoverDialog: FC<CoverDialogProps> = ({
       const result = await api.fetchAnilistCover(projectId, fetchedId)
       onCoverChange({
         coverPath: result.coverPath,
+        coverThumbnailPath: result.coverThumbnailPath,
         anilistId: fetchedId,
         coverTitle: result.title,
       })
@@ -122,7 +128,12 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     setRemoving(true)
     try {
       await api.removeProjectCover(projectId)
-      onCoverChange({ coverPath: null, anilistId: null, coverTitle: null })
+      onCoverChange({
+        coverPath: null,
+        coverThumbnailPath: null,
+        anilistId: null,
+        coverTitle: null,
+      })
       setLocalAnilistId(null)
       setLocalCoverTitle(null)
       toast({ title: 'Cover removed' })

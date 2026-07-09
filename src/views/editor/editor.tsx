@@ -23,6 +23,7 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
   const [loading, setLoading] = useState(true)
   const [cover, setCover] = useState<CoverInfo>({
     coverPath: project.coverPath,
+    coverThumbnailPath: project.coverThumbnailPath,
     anilistId: project.anilistId,
     coverTitle: project.coverTitle,
   })
@@ -104,6 +105,7 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
 
         <CoverThumbnail
           coverPath={cover.coverPath}
+          coverThumbnailPath={cover.coverThumbnailPath}
           coverVersion={coverVersion}
           size="sm"
           onClick={() => setCoverDialogOpen(true)}

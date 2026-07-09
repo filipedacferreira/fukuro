@@ -1,4 +1,7 @@
-export type CoverInfo = Pick<Project, 'coverPath' | 'anilistId' | 'coverTitle'>
+export type CoverInfo = Pick<
+  Project,
+  'coverPath' | 'coverThumbnailPath' | 'anilistId' | 'coverTitle'
+>
 
 export interface Project {
   id: string
@@ -7,6 +10,7 @@ export interface Project {
   createdAt: number
   chapterCount: number
   coverPath: string | null
+  coverThumbnailPath: string | null
   anilistId: number | null
   coverTitle: string | null
 }

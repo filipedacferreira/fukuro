@@ -53,13 +53,16 @@ export const api = {
   ) => invoke<void>('create_cbz', { projectId, outputPath, onEvent }),
 
   setProjectCover: (projectId: string, imagePath: string) =>
-    invoke<string>('set_project_cover', { projectId, imagePath }),
+    invoke<{ coverPath: string; coverThumbnailPath: string }>(
+      'set_project_cover',
+      { projectId, imagePath },
+    ),
 
   fetchAnilistCover: (projectId: string, anilistId: number) =>
-    invoke<{ title: string; coverPath: string }>('fetch_anilist_cover', {
-      projectId,
-      anilistId,
-    }),
+    invoke<{ title: string; coverPath: string; coverThumbnailPath: string }>(
+      'fetch_anilist_cover',
+      { projectId, anilistId },
+    ),
 
   removeProjectCover: (projectId: string) =>
     invoke<void>('remove_project_cover', { projectId }),
