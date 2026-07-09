@@ -24,6 +24,18 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     .unwrap_or(0) > 0 // if the pragma fails for any reason, assume the column doesn't exist
 }
 
+// Returns true if `table` already exists in the database schema.
+// Used to detect pre-"single library root" databases (see the v4 migration below) —
+// sqlite_master is SQLite's built-in schema catalog, one row per table/index/etc.
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![table],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
+
 // Called once at startup (lib.rs) to set up pragmas and create tables.
 // `IF NOT EXISTS` makes this safe to run on every launch — it's a no-op
 // when the DB already has the tables.
@@ -34,11 +46,37 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         "PRAGMA journal_mode=WAL;
 
          -- Enforce REFERENCES constraints (SQLite ignores them by default without this).
-         PRAGMA foreign_keys=ON;
+         PRAGMA foreign_keys=ON;",
+    )?;
+
+    // v4: single watched library root, replacing per-manga manual imports. Old databases
+    // have no `settings` table — their `projects` rows each point at an independent,
+    // manually-picked root_path, which the new "one root, auto-scanned" model can't
+    // reconcile. Rather than attempt a migration, drop the old data and let the fresh
+    // scan of the newly-configured library root repopulate everything. ON DELETE CASCADE
+    // isn't in play here (we're dropping the tables outright), so children are dropped
+    // explicitly in FK order (excluded_images -> chapters -> projects).
+    if !table_exists(conn, "settings") {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS excluded_images;
+             DROP TABLE IF EXISTS chapters;
+             DROP TABLE IF EXISTS projects;",
+        )?;
+    }
+
+    conn.execute_batch(
+        // Generic key-value store for app-wide settings. Currently holds a single row,
+        // key = 'library_root', but a table (rather than a dedicated column somewhere)
+        // keeps room for future settings without another migration.
+        "CREATE TABLE IF NOT EXISTS settings (
+             key TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
 
          CREATE TABLE IF NOT EXISTS projects (
              id TEXT PRIMARY KEY,
-             root_path TEXT NOT NULL,   -- the folder the user opened
+             root_path TEXT NOT NULL,   -- absolute path to this manga's folder (a direct
+                                        -- child of the configured library root)
              name TEXT NOT NULL,        -- derived from the folder name, shown in the UI
              created_at INTEGER NOT NULL -- Unix timestamp (seconds)
          );
