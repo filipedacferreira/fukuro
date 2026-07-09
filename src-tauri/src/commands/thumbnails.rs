@@ -16,33 +16,19 @@ pub struct ThumbnailUpdate {
     pub thumbnail_path: String,
 }
 
-// Generates a thumbnail for a single image and writes it to `dest`.
-// Skips the work entirely if the thumbnail already exists (cache hit).
-// Not a Tauri command — called internally by generate_chapter_thumbnails_stream.
-pub fn ensure_thumbnail(source: &Path, dest: &Path) -> Result<(), String> {
-    if dest.exists() {
-        return Ok(()); // already cached, nothing to do
-    }
-
-    // Create the thumbnail directory if this is the first image for this chapter.
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-
-    // Decode the source image into an in-memory pixel buffer.
-    let img = image::ImageReader::open(source)
-        .map_err(|e| e.to_string())?
-        .decode()
-        .map_err(|e| e.to_string())?;
-
+// Downscales a decoded image to `target_width` (preserving aspect ratio, never upscaling)
+// and returns it JPEG-encoded at quality 75. Shared by chapter-image thumbnails
+// (`ensure_thumbnail` below) and project cover thumbnails (`commands::cover`), since both
+// are small UI-only previews backed by a separate full-resolution master file.
+pub fn resize_to_jpeg(img: image::DynamicImage, target_width: u32) -> Result<Vec<u8>, String> {
     // Convert to RGB8 (3 bytes per pixel, no alpha) — the format fast_image_resize expects.
     // This also normalises PNGs with transparency, grayscale images, etc.
     let rgb = img.to_rgb8();
     let (src_w, src_h) = rgb.dimensions();
 
-    // Scale down to 200px wide, preserving aspect ratio.
-    // .min(src_w) avoids upscaling images that are already smaller than 200px.
-    let dst_w = 200u32.min(src_w);
+    // Scale down to `target_width`, preserving aspect ratio.
+    // .min(src_w) avoids upscaling images that are already smaller than the target.
+    let dst_w = target_width.min(src_w);
     let dst_h = ((src_h as f64 * dst_w as f64) / src_w as f64).round() as u32;
 
     // fast_image_resize uses SIMD instructions (AVX2/SSE4 on x86, NEON on ARM)
@@ -62,7 +48,7 @@ pub fn ensure_thumbnail(source: &Path, dest: &Path) -> Result<(), String> {
     let mut dst_fir = FirImage::new(dst_w, dst_h, PixelType::U8x3);
 
     // Bilinear filter: good balance of speed and quality for downscaling.
-    // Lanczos3 would be sharper but ~3× slower — not worth it at 200px.
+    // Lanczos3 would be sharper but ~3× slower — not worth it at this size.
     Resizer::new()
         .resize(
             &src_fir,
@@ -71,12 +57,36 @@ pub fn ensure_thumbnail(source: &Path, dest: &Path) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
 
-    // Encode the resized buffer as JPEG at quality 75 and write to disk.
-    // Quality 75 is indistinguishable from 85+ at 200px and encodes ~20% faster.
-    let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    image::codecs::jpeg::JpegEncoder::new_with_quality(file, 75)
+    // Encode the resized buffer as JPEG at quality 75. Quality 75 is indistinguishable
+    // from 85+ at these sizes and encodes ~20% faster.
+    let mut buf = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 75)
         .encode(dst_fir.buffer(), dst_w, dst_h, image::ExtendedColorType::Rgb8)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(buf)
+}
+
+// Generates a thumbnail for a single image and writes it to `dest`.
+// Skips the work entirely if the thumbnail already exists (cache hit).
+// Not a Tauri command — called internally by generate_chapter_thumbnails_stream.
+pub fn ensure_thumbnail(source: &Path, dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        return Ok(()); // already cached, nothing to do
+    }
+
+    // Create the thumbnail directory if this is the first image for this chapter.
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    // Decode the source image into an in-memory pixel buffer.
+    let img = image::ImageReader::open(source)
+        .map_err(|e| e.to_string())?
+        .decode()
+        .map_err(|e| e.to_string())?;
+
+    let bytes = resize_to_jpeg(img, 200)?;
+    std::fs::write(dest, &bytes).map_err(|e| e.to_string())
 }
 
 // Generates thumbnails for all images in a chapter that don't already have one cached.
