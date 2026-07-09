@@ -74,7 +74,7 @@ src-tauri/src/
 
 ## Database
 
-SQLite at `{AppData}/fukuro.db` (macOS: `~/Library/Application Support/io.fukuro/fukuro.db`).
+SQLite at `{AppData}/fukuro.db`.
 
 ```sql
 projects       (id, root_path, name, created_at, cover_path, anilist_id)
@@ -116,7 +116,6 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 Generated on first expand of each chapter, cached across sessions.
 
 - **Location:** `{AppData}/thumbnails/{chapter_id}/{stem}.jpg`
-  (macOS: `~/Library/Application Support/io.fukuro/thumbnails/`)
 - **Size:** 200 px wide, proportional height
 - **Encoding:** JPEG quality 75
 - **Algorithm:** bilinear via `fast_image_resize` (SIMD), parallel workers via `rayon`
@@ -154,11 +153,13 @@ All Rust source files must have descriptive inline comments, even for constructs
 
 ## Git commits
 
-Format: `feat(context): message` — one line, no description, no co-authoring.
+Format: `action(context): message` — single line, no description body, no co-authoring.
 
 Split changes into multiple logical commits, each covering a single concern (e.g. DB schema, Rust commands, frontend feature, tooling, docs). Never bundle unrelated changes into one commit.
 
-**Never commit without explicit approval.** Do not run `git commit` unless the user explicitly says to commit, or you have asked and received clear confirmation. Finishing a task does not imply approval to commit.
+Before committing, `git status` must be clean afterward — no leftover untracked or modified files. Stage everything relevant to the commit(s) being made; don't leave stray files sitting uncommitted.
+
+**Never commit without explicit approval.** Do not run `git commit` unless the user explicitly says to commit, or you have asked and received clear confirmation. Finishing a task does not imply approval to commit. Before committing, present the proposed split (if multiple commits) and each commit message, and wait for the user to confirm they look right.
 
 ## Development
 
@@ -254,32 +255,30 @@ Ensures correct display order in all CBZ readers.
 
 Images within each chapter folder are sorted with a natural sort algorithm (1, 2, 10 — not 1, 10, 2). Implemented in `commands/images.rs:natural_sort_key`.
 
-## Platform target — Windows first
+## Platform target — Windows only
 
-Windows is the primary target platform. macOS is supported but secondary. Every decision must be verified to work correctly on Windows.
+Windows is the only supported platform. The project is developed, built, and run exclusively on Windows; no macOS/Linux testing or support is maintained.
 
 ### Path handling
 
-Never manipulate file paths as raw strings. Always use Tauri's path APIs, which return and accept native OS paths (backslashes on Windows, forward slashes on macOS/Linux).
+Never manipulate file paths as raw strings. Always use Tauri's path APIs, which return and accept native Windows paths (backslashes).
 
 - **Obtaining paths** — use `@tauri-apps/plugin-dialog` (`open`, `save`); the returned string is already the correct native path.
 - **Joining / resolving paths** — use `@tauri-apps/api/path` (`join`, `resolve`, `appDataDir`, etc.).
 - **Displaying paths in the UI** — render as-is; do not normalise separators for display.
-- **Image `src` attributes** — convert with `convertFileSrc` from `@tauri-apps/api/core` (produces the correct `asset://` / `https://asset.localhost/` URL per platform).
+- **Image `src` attributes** — convert with `convertFileSrc` from `@tauri-apps/api/core` (produces the correct `asset://` URL).
 - **Rust side** — use `std::path::PathBuf` and `.join()` throughout; never concatenate strings with `/`.
 
 ### UI copy
 
-Avoid macOS-specific terms. Use OS-neutral language:
+Use Windows-native terms:
 
-| ❌ Don't use | ✅ Use instead |
-|---|---|
-| Show in Finder | Show in folder |
-| Reveal in Finder | Reveal in folder |
-| Trash | Delete |
-| ⌘ shortcuts in copy | avoid in UI labels |
+| Term |
+|---|
+| Show in folder |
+| Delete |
 
 ### Shell / file-manager actions
 
-Use `revealItemInDir` from `@tauri-apps/plugin-opener` to reveal files in the system file manager. It calls Explorer on Windows, Finder on macOS, and the default file manager on Linux. Already bundled — no extra dependency needed.
+Use `revealItemInDir` from `@tauri-apps/plugin-opener` to reveal files in Explorer. Already bundled — no extra dependency needed.
 
