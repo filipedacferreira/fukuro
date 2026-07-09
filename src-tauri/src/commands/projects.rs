@@ -66,6 +66,63 @@ pub fn create_project(
         return Err(format!("Not a directory: {}", root_path));
     }
 
+    // If this folder was already imported, reuse that project instead of inserting a
+    // duplicate — otherwise picking the same folder again (e.g. after downloading new
+    // chapters into it) would create a second project pointing at the same files.
+    // Paths are stored with native separators, so we can't filter by normalised path in
+    // SQL; scan in Rust instead — project counts are small enough that this is cheap.
+    let normalized_root = normalize_path(root);
+    let all_projects: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, root_path FROM projects")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+    let existing_id = all_projects
+        .into_iter()
+        .find(|(_, path)| normalize_path(Path::new(path)) == normalized_root)
+        .map(|(id, _)| id);
+
+    if let Some(project_id) = existing_id {
+        // Rescan for any new subfolders (e.g. freshly downloaded chapters) and drop
+        // chapters whose folder no longer exists, before returning — so reopening an
+        // existing project's folder reflects the current state of the disk immediately.
+        insert_new_chapters(&conn, &project_id, &root_path)?;
+        remove_missing_chapters(&conn, &project_id)?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
+                        p.cover_path, p.anilist_id, p.cover_title
+                 FROM projects p
+                 LEFT JOIN chapters c ON c.project_id = p.id
+                 WHERE p.id = ?1
+                 GROUP BY p.id",
+            )
+            .map_err(|e| e.to_string())?;
+        return stmt
+            .query_row(params![project_id], |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    root_path: row.get(1)?,
+                    name: row.get(2)?,
+                    created_at: row.get(3)?,
+                    chapter_count: row.get(4)?,
+                    cover_path: row.get(5)?,
+                    anilist_id: row.get(6)?,
+                    cover_title: row.get(7)?,
+                })
+            })
+            .map_err(|e| e.to_string());
+    }
+
     // Derive the project name from the folder name (the last segment of the path).
     let name = root
         .file_name()
@@ -205,25 +262,17 @@ pub fn rename_project(
     Ok(())
 }
 
-// Returns all chapters for a project, ordered by sort_order.
-// Also rescans the project's root folder for any new subdirectories added since the
-// project was created, inserting them as new chapters at the end of the list.
-#[tauri::command]
-pub fn get_project_chapters(
-    project_id: String,
-    state: tauri::State<DbState>,
-) -> Result<Vec<Chapter>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-
-    // Look up the root folder so we can rescan it.
-    let root_path: String = conn
-        .query_row(
-            "SELECT root_path FROM projects WHERE id = ?1",
-            params![project_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
+// Rescans a project's root folder for subdirectories not yet in the DB and inserts
+// them as new chapters, appended after the existing ones by sort_order.
+// Shared by `get_project_chapters` (rescan on open) and the folder watcher in
+// `watch.rs` (rescan on filesystem change) so both paths dedupe against the DB the
+// same way. Returns whether any new chapters were inserted, so callers can decide
+// whether to notify the frontend.
+pub(crate) fn insert_new_chapters(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    root_path: &str,
+) -> Result<bool, String> {
     // Collect the folder paths of chapters already in the DB into a HashSet for O(1) lookup.
     // The braces create a new scope so `stmt` is dropped (and its borrow of `conn` released)
     // as soon as we've collected the results — Rust requires all borrows to end before
@@ -244,7 +293,7 @@ pub fn get_project_chapters(
     };
 
     // Find subdirectories on disk that aren't in the DB yet.
-    let mut new_dirs: Vec<_> = std::fs::read_dir(&root_path)
+    let mut new_dirs: Vec<_> = std::fs::read_dir(root_path)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
@@ -254,8 +303,10 @@ pub fn get_project_chapters(
         .collect();
     new_dirs.sort_by_key(|e| e.file_name());
 
+    let inserted_any = !new_dirs.is_empty();
+
     // Insert the new subdirectories as chapters, appended after the existing ones.
-    if !new_dirs.is_empty() {
+    if inserted_any {
         // Find the current highest sort_order so we can append after it.
         let max_order: i64 = conn
             .query_row(
@@ -282,6 +333,71 @@ pub fn get_project_chapters(
             .map_err(|e| e.to_string())?;
         }
     }
+
+    Ok(inserted_any)
+}
+
+// Deletes chapters whose folder_path no longer exists on disk. The DB schema's
+// ON DELETE CASCADE takes care of that chapter's excluded_images rows too.
+// Shared by `get_project_chapters` (rescan on open) and the folder watcher in
+// `watch.rs` (rescan on filesystem change), mirroring `insert_new_chapters`.
+// Returns whether any chapters were removed, so callers can decide whether to
+// notify the frontend.
+pub(crate) fn remove_missing_chapters(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+) -> Result<bool, String> {
+    let chapters: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, folder_path FROM chapters WHERE project_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String)> = stmt
+            .query_map(params![project_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    let missing_ids: Vec<String> = chapters
+        .into_iter()
+        .filter(|(_, folder_path)| !Path::new(folder_path).is_dir())
+        .map(|(id, _)| id)
+        .collect();
+
+    let removed_any = !missing_ids.is_empty();
+
+    for id in &missing_ids {
+        conn.execute("DELETE FROM chapters WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(removed_any)
+}
+
+// Returns all chapters for a project, ordered by sort_order.
+// Also rescans the project's root folder: new subdirectories are inserted as chapters,
+// and chapters whose folder was deleted on disk are removed from the DB.
+#[tauri::command]
+pub fn get_project_chapters(
+    project_id: String,
+    state: tauri::State<DbState>,
+) -> Result<Vec<Chapter>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+
+    // Look up the root folder so we can rescan it.
+    let root_path: String = conn
+        .query_row(
+            "SELECT root_path FROM projects WHERE id = ?1",
+            params![project_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    insert_new_chapters(&conn, &project_id, &root_path)?;
+    remove_missing_chapters(&conn, &project_id)?;
 
     // Query all chapters (including any just inserted) in sort order.
     // The subquery counts excluded images inline so the frontend gets the badge count
