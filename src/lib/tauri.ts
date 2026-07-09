@@ -8,8 +8,10 @@ import type {
 } from '@/types'
 
 export const api = {
-  createProject: (rootPath: string) =>
-    invoke<Project>('create_project', { rootPath }),
+  getLibraryRoot: () => invoke<string | null>('get_library_root'),
+
+  setLibraryRoot: (rootPath: string) =>
+    invoke<Project[]>('set_library_root', { rootPath }),
 
   listProjects: () => invoke<Project[]>('list_projects'),
 
@@ -61,9 +63,4 @@ export const api = {
 
   removeProjectCover: (projectId: string) =>
     invoke<void>('remove_project_cover', { projectId }),
-
-  startWatchingProject: (projectId: string) =>
-    invoke<void>('start_watching_project', { projectId }),
-
-  stopWatchingProject: () => invoke<void>('stop_watching_project'),
 }

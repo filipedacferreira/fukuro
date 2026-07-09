@@ -43,18 +43,10 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
       .finally(() => setLoading(false))
   }, [project.id])
 
-  // Watch the project's root folder for new chapter subfolders while the editor is
-  // open (e.g. new chapters downloaded into the same folder). The watcher is torn
-  // down on unmount/project switch, not on window focus loss, since the user is
-  // likely alt-tabbing to their file manager to add folders.
+  // The library watcher (started for the app's whole session, see watch.rs) emits this
+  // whenever a chapter subfolder is added or removed under this project's folder — no
+  // per-editor start/stop needed since watching now runs continuously in the background.
   useEffect(() => {
-    api.startWatchingProject(project.id).catch((e) =>
-      toast({
-        title: 'Failed to watch project folder',
-        description: String(e),
-      }),
-    )
-
     const unlisten = listen<string>('chapters-updated', (event) => {
       if (event.payload !== project.id) return
       api.getProjectChapters(project.id).then(setChapters)
@@ -62,7 +54,6 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
 
     return () => {
       unlisten.then((fn) => fn())
-      api.stopWatchingProject().catch(() => {})
     }
   }, [project.id])
 

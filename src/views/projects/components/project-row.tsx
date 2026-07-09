@@ -100,7 +100,8 @@ const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
         Delete &ldquo;{name}&rdquo;?
       </Dialog.Title>
       <Dialog.Description>
-        This removes the project from fukuro. Your manga files won't be deleted.
+        This permanently deletes the folder and all its chapters from your disk.
+        This can't be undone.
       </Dialog.Description>
       <Dialog.Actions>
         <Dialog.Close asChild>
