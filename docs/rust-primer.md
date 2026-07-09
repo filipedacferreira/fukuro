@@ -387,7 +387,7 @@ Key points:
 
 ## `notify` — filesystem watching from a background thread
 
-`commands/watch.rs` watches a project's root folder for chapter subfolders being added or removed while the editor is open, so downloading new chapters (or deleting old ones) doesn't require re-importing the project.
+`commands/watch.rs` watches the entire configured library root — both the manga level (its immediate subfolders) and the chapter level (each manga's immediate subfolders) — for the whole app session, so adding/removing manga or chapter folders never requires restarting or re-importing anything.
 
 ```rust
 let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
@@ -395,38 +395,88 @@ let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| 
 })
 .map_err(|e| e.to_string())?;
 
-watcher.watch(Path::new(&root_path), RecursiveMode::NonRecursive)?;
+watcher.watch(Path::new(&library_root), RecursiveMode::Recursive)?;
 ```
 
 `notify::recommended_watcher` picks the best backend for the current OS (on Windows, `ReadDirectoryChangesW`) and runs it on a thread it manages internally — there's no `std::thread::spawn` here, unlike the thumbnail/export streaming commands. The closure you pass is the event handler, called once per filesystem event.
 
+**One recursive watch covers two logical levels**
+
+`RecursiveMode::Recursive` on Windows uses `ReadDirectoryChangesW`'s recursive flag, which automatically covers newly-created subfolders at any depth — you don't need to call `.watch()` again when a new manga folder appears, unlike a scheme where you'd manually add a watch per folder. That means a *single* `watch()` call on the library root sees every folder-level change, at any depth, for the whole session.
+
+The event handler is what turns "any depth" back into "the two levels we actually care about." For every path in an event, it compares that path's **parent directory** against the library root and against every known project's `root_path`:
+
+```rust
+if normalized_parent == normalized_root {
+    // a manga folder appeared/disappeared directly under the library root
+} else if let Some((project_id, project_root)) = project_roots
+    .iter()
+    .find(|(_, root)| normalize_path(Path::new(root)) == normalized_parent)
+{
+    // a chapter folder appeared/disappeared directly under that manga's folder
+}
+// anything else (e.g. an image file inside a chapter folder) is ignored
+```
+
+This is why the recursive watch is safe to use broadly: events three or more levels deep (an image file, a `.tmp` file mid-download, etc.) simply don't match either parent-dir check and are dropped without doing anything.
+
 **Getting state into the handler closure**
 
-The handler closure isn't a `#[tauri::command]`, so Tauri can't inject `AppHandle` or `State` into it the normal way. Instead, clone what you need from the surrounding command *before* the closure and `move` the clones in:
+The handler closure isn't a `#[tauri::command]`, so Tauri can't inject `AppHandle` or `State` into it the normal way. Instead, clone what you need from the surrounding function *before* the closure and `move` the clone in:
 
 ```rust
 let app_for_handler = app.clone();
-let project_id_for_handler = project_id.clone();
 ```
 
-`AppHandle` is cheap to clone (it's a handle, not the app itself) and `Send + Sync`, so it's safe to hand a clone to notify's background thread. Inside the closure, `app_for_handler.state::<DbState>()` fetches the same managed state that `tauri::State<DbState>` would inject into a command.
+`AppHandle` is cheap to clone (it's a handle, not the app itself) and `Send + Sync`, so it's safe to hand a clone to notify's background thread. Inside the closure, `app_for_handler.state::<DbState>()` fetches the same managed state that `tauri::State<DbState>` would inject into a command. Everything else the closure needs (the library root, the current list of project root_paths) is re-read from the DB on every event rather than captured once — both can change over the watcher's lifetime, and the extra query is cheap next to the filesystem rescans it gates.
 
-**Keeping the watcher alive — and stopping it**
+**Keeping the watcher alive — and restarting it**
 
-A `RecommendedWatcher` stops watching the moment it's dropped. That's the mechanism this codebase uses for teardown: `WatcherState` holds `Mutex<Option<RecommendedWatcher>>`, and both "switch to watching a different project" and "stop watching" just assign a new value into that `Option` — the old watcher (if any) is dropped as part of the assignment, which stops it:
+A `RecommendedWatcher` stops watching the moment it's dropped. That's the mechanism this codebase uses for teardown/restart: `WatcherState` holds `Mutex<Option<RecommendedWatcher>>`, and `start_library_watcher` just assigns a new value into that `Option` — the old watcher (if any) is dropped as part of the assignment, which stops it:
 
 ```rust
 let mut guard = watcher_state.0.lock().map_err(|e| e.to_string())?;
 *guard = Some(watcher); // replaces (and thus drops/stops) any previous watcher
 ```
 
-```rust
-*guard = None; // drops the watcher, stopping it — used by stop_watching_project
-```
+`start_library_watcher` is a plain function, not a `#[tauri::command]` — it's called from `lib.rs`'s `setup()` at launch (if a library root is already configured from a previous session) and again from `set_library_root` whenever the user points the app at a different root. If no root is configured, it just clears `WatcherState` to `None` and returns — no watcher runs until one is set.
 
 **Deduplicating events**
 
-Filesystem watchers commonly fire multiple events for a single logical change (e.g. `Create` followed by a `Modify` as the OS finishes writing metadata), and notify's Windows backend reports generic `Create(CreateKind::Any)` / `Remove(RemoveKind::Any)` rather than distinguishing files from folders. Rather than trying to parse event details precisely, the handler just re-runs the same rescan logic used by `get_project_chapters`: `insert_new_chapters` adds any subfolder not yet in the DB, and `remove_missing_chapters` deletes any chapter whose `folder_path` no longer exists on disk. Both dedupe against actual DB/disk state, so redundant events end up as no-op rescans — and deleting a chapter folder outside the app removes it from the project automatically (no confirmation prompt, since the deletion already happened on disk).
+Filesystem watchers commonly fire multiple events for a single logical change (e.g. `Create` followed by a `Modify` as the OS finishes writing metadata), and notify's Windows backend reports generic `Create(CreateKind::Any)` / `Remove(RemoveKind::Any)` rather than distinguishing files from folders. Rather than trying to parse event details precisely, the handler just re-runs the same rescan logic used by `list_projects`/`get_project_chapters`: `insert_new_projects`/`insert_new_chapters` add any subfolder not yet in the DB, and `remove_missing_projects`/`remove_missing_chapters` delete any row whose folder no longer exists on disk. All four dedupe against actual DB/disk state, so redundant events end up as no-op rescans — and deleting a manga or chapter folder outside the app removes it automatically (no confirmation prompt, since the deletion already happened on disk).
+
+---
+
+## Guard-checked migrations — `column_exists` and `table_exists`
+
+SQLite (as bundled here) has no `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and no schema-version primitive built into `rusqlite`, so `db.rs`'s `initialize()` guards each migration step by checking, in plain SQL, whether the thing it's about to add already exists:
+
+```rust
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        params![table, column],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        params![table],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
+```
+
+`pragma_table_info(table)` is a table-valued function SQLite provides for introspecting a table's columns; `sqlite_master` is SQLite's built-in catalog of every table/index/etc. in the database. Both guards return `false` (rather than propagating an error) if the query itself fails — safe because a failure here almost always means "the table doesn't exist yet," which is exactly the case the caller wants to treat as "not present."
+
+`initialize()` runs on every launch, so `CREATE TABLE IF NOT EXISTS` handles brand-new databases for free. These guards exist for the two migration shapes `IF NOT EXISTS` can't express:
+
+- **Adding a column to an existing table** (`cover_path`, `anilist_id`, `cover_title`): guarded with `column_exists`, then `ALTER TABLE ... ADD COLUMN` runs only if it's missing.
+- **A breaking schema change with no in-place migration path**: when the single-library-root rearchitecture landed, old databases' `projects` rows each pointed at an independent, manually-picked folder — a shape the new "one root, auto-scanned" model can't reconcile. Rather than write a data migration, `table_exists(conn, "settings")` detects "this is an old-schema DB" (the `settings` table is new) and drops `excluded_images`/`chapters`/`projects` outright before the normal `CREATE TABLE IF NOT EXISTS` block repopulates them — the next scan of whatever library root the user configures rebuilds everything from disk.
 
 ---
 

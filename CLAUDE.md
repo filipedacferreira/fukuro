@@ -32,7 +32,7 @@ src/
     utils/classnames.ts           # CVA + tailwind-merge setup (cn, cva)
   views/
     projects/                     # Projects list view
-      project-list.tsx            # Home screen: recent projects, open folder
+      project-list.tsx            # Home screen: library-root onboarding, live project list, ChangeLibraryDialog
       components/
         project-row.tsx           # Project card + ProjectRenameDialog + ProjectDeleteDialog
     editor/                       # Editor view
@@ -63,13 +63,14 @@ src-tauri/src/
   utils.rs                        # Shared helpers: is_image_file, natural_sort_key
   commands/
     mod.rs
-    projects.rs                   # create_project, list_projects, delete_project, rename_project, get_project_chapters
+    settings.rs                   # get_library_root, set_library_root; read_library_root helper
+    projects.rs                   # list_projects, delete_project, rename_project, get_project_chapters, insert/remove_new_*_projects, cleanup_project_assets
     chapters.rs                   # reorder_chapters, rename_chapter
     images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
     export.rs                     # create_cbz
     cover.rs                      # set_project_cover, fetch_anilist_cover, remove_project_cover
-    watch.rs                      # start_watching_project, stop_watching_project
+    watch.rs                      # start_library_watcher (plain fn, not a command) + WatcherState
 ```
 
 ## Database
@@ -77,12 +78,15 @@ src-tauri/src/
 SQLite at `{AppData}/fukuro.db`.
 
 ```sql
+settings       (key, value)  -- key-value store; currently one row, key='library_root'
 projects       (id, root_path, name, created_at, cover_path, anilist_id)
 chapters       (id, project_id→projects, folder_path, display_name, sort_order, image_count)
 excluded_images(chapter_id→chapters, image_path)  -- soft-delete exclusions
 ```
 
 `cover_path` and `anilist_id` are nullable — added via `ALTER TABLE` migration in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`).
+
+The `settings` table's presence also gates a one-time fresh-reset migration: databases from before the single-library-root rearchitecture (no `settings` table) have their `projects`/`chapters`/`excluded_images` tables dropped on next launch rather than migrated in place, since old projects each had an independently-picked `root_path` that the new "one watched root, auto-scanned" model can't reconcile. Everything is rebuilt from disk once the user (re-)configures a library root.
 
 Foreign keys with `ON DELETE CASCADE`. WAL mode enabled.
 
@@ -92,10 +96,11 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 
 | Command | Description |
 |---|---|
-| `create_project(rootPath)` | Scan folder for subdirs, create project + chapters in DB. If a project already exists for that `rootPath`, reuses it (rescanning for new subdirs) instead of inserting a duplicate |
-| `list_projects()` | Return projects ordered by `created_at DESC` |
-| `delete_project(id)` | Cascade delete (chapters + exclusions) |
-| `rename_project(id, name)` | Update project display name |
+| `get_library_root()` | Returns the configured library root path, or `null` if none is set yet |
+| `set_library_root(rootPath)` | Wipes all existing projects (and their cached covers/thumbnails), points the app at `rootPath`, scans its immediate subfolders as projects (each with its own chapters), restarts the library watcher, and returns the fresh project list |
+| `list_projects()` | Rescans the library root (new manga subfolders inserted, missing ones removed) and returns projects ordered by `created_at DESC`; returns `[]` if no library root is configured |
+| `delete_project(id)` | **Permanently deletes the manga's folder from disk** (`fs::remove_dir_all`), then cascade-deletes its DB row (chapters + exclusions) and cleans up its cached cover/thumbnails. If the folder can't be removed (e.g. a file inside is open elsewhere), the error is returned and the DB row is left untouched |
+| `rename_project(id, name)` | Update project display name (does not rename the folder on disk) |
 | `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, and deletes chapters whose folder no longer exists |
 | `reorder_chapters(chapterIds[])` | Bulk update `sort_order` after drag-drop |
 | `rename_chapter(id, name)` | Update `display_name` |
@@ -108,8 +113,8 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100, store in `{AppData}/covers/`, update DB |
 | `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, re-encode and store; returns `{ title, coverPath }` |
 | `remove_project_cover(projectId)` | Delete cover file and clear `cover_path`/`anilist_id` in DB |
-| `start_watching_project(projectId)` | Watches the project's `root_path` (non-recursive) for chapter subfolders being added or removed while the editor is open; replaces any previously active watcher. On a filesystem `Create`/`Remove` event, rescans: inserts new chapters and deletes chapters whose folder no longer exists (no confirmation — the deletion already happened on disk), then emits a `chapters-updated` event with the project id |
-| `stop_watching_project()` | Stops the active watcher, if any |
+
+`start_library_watcher` (in `watch.rs`) is not an invokable command — it's a plain function called from `lib.rs`'s `setup()` at launch (if a library root is already configured) and from `set_library_root` whenever the root changes. It watches the entire library root recursively for the whole app session (both the manga level and the chapter level — see `docs/rust-primer.md`'s `notify` entry for how one recursive watch is scoped back to those two levels), replacing any previously active watcher. On a relevant `Create`/`Remove` event it rescans the affected level and emits either `projects-updated` (payload: the fresh `Project[]`) or `chapters-updated` (payload: the affected project id) — no confirmation, since the filesystem change already happened.
 
 ## Thumbnail cache
 
@@ -150,6 +155,12 @@ The developer is new to Rust and Tauri. `docs/rust-primer.md` is a living refere
 The goal is that the developer can read any file in `src-tauri/` and immediately look up what an unfamiliar construct does in the primer. Do not let the primer fall out of sync. Prefer updating an existing entry over adding a new one if the concept already has coverage.
 
 All Rust source files must have descriptive inline comments, even for constructs that may seem obvious. These comments complement the primer and help the developer build intuition while reading code directly.
+
+## Feature planning — PRIORITY
+
+Before implementing any new feature (not bug fixes, not refactors — new user-facing or backend functionality), always run the `grilling` skill (relentless interview to sharpen the plan/design) first, even if the user did not invoke it via `/grill-me` or `/grilling`. This applies regardless of how the feature request was phrased — treat it as a mandatory gate, not an optional offer.
+
+Do not start writing code for a new feature until the grilling session has reached a shared understanding of the design.
 
 ## Git commits
 
