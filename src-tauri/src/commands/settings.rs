@@ -55,19 +55,31 @@ pub fn set_library_root(
     {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
 
-        let existing: Vec<(String, Option<String>)> = {
+        let existing: Vec<(String, Option<String>, Option<String>)> = {
             let mut stmt = conn
-                .prepare("SELECT id, cover_path FROM projects")
+                .prepare("SELECT id, cover_path, cover_thumbnail_path FROM projects")
                 .map_err(|e| e.to_string())?;
-            let rows: Vec<(String, Option<String>)> = stmt
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+            let rows: Vec<(String, Option<String>, Option<String>)> = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                })
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
                 .collect();
             rows
         };
-        for (project_id, cover_path) in &existing {
-            cleanup_project_assets(&conn, &app, project_id, cover_path.as_deref())?;
+        for (project_id, cover_path, cover_thumbnail_path) in &existing {
+            cleanup_project_assets(
+                &conn,
+                &app,
+                project_id,
+                cover_path.as_deref(),
+                cover_thumbnail_path.as_deref(),
+            )?;
         }
         // ON DELETE CASCADE removes their chapters/excluded_images rows too.
         conn.execute("DELETE FROM projects", [])

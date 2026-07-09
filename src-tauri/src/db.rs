@@ -113,6 +113,13 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "projects", "cover_title") {
         conn.execute_batch("ALTER TABLE projects ADD COLUMN cover_title TEXT;")?;
     }
+    // v5: cache a small (200px-wide) cover thumbnail separately from the full-resolution
+    // cover_path master. The master is embedded verbatim as page 0000 in CBZ exports, so
+    // it can't be downscaled — but the UI only ever displays covers at a few dozen pixels,
+    // so decoding the master for every list row/header render was wasteful.
+    if !column_exists(conn, "projects", "cover_thumbnail_path") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN cover_thumbnail_path TEXT;")?;
+    }
 
     Ok(())
 }

@@ -4,13 +4,22 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::Manager;
 
+use crate::commands::thumbnails::resize_to_jpeg;
 use crate::db::DbState;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverResult {
+    pub cover_path: String,
+    pub cover_thumbnail_path: String,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnilistResult {
     pub title: String,
     pub cover_path: String,
+    pub cover_thumbnail_path: String,
 }
 
 // Resolves the covers directory under AppData, creating it if needed.
@@ -24,8 +33,24 @@ fn covers_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, Strin
     Ok(dir)
 }
 
-// Re-encodes any supported image format to JPEG quality 100 and writes it to `dest`.
-fn encode_cover(source_bytes: &[u8], dest: &std::path::Path) -> Result<(), String> {
+// Resolves the cover thumbnail cache directory under AppData, creating it if needed.
+// Kept separate from `covers_dir` so `remove_dir_all("covers")` semantics stay simple
+// if ever needed, and to mirror the chapter thumbnails/`thumbnails` split.
+fn cover_thumbnails_dir(app_handle: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = covers_dir(app_handle)?.join("thumbnails");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+// Re-encodes any supported image format to JPEG quality 100 and writes it to `dest` — this
+// is the master file, later embedded verbatim as page 0000 in CBZ exports, so it keeps full
+// resolution. A separate 200px-wide thumbnail (for UI display only) is written to
+// `thumb_dest` from the same decoded image, avoiding a second decode of `source_bytes`.
+fn encode_cover(
+    source_bytes: &[u8],
+    dest: &std::path::Path,
+    thumb_dest: &std::path::Path,
+) -> Result<(), String> {
     let img = image::load_from_memory(source_bytes).map_err(|e| e.to_string())?;
     // to_rgba8() normalises any pixel format (grayscale, palette, etc.) to 8-bit RGBA.
     let rgba = img.to_rgba8();
@@ -48,6 +73,12 @@ fn encode_cover(source_bytes: &[u8], dest: &std::path::Path) -> Result<(), Strin
         .map_err(|e| e.to_string())?;
 
     std::fs::write(dest, &buf).map_err(|e| e.to_string())?;
+
+    // `img` is only moved here (not borrowed) — the master encode above already extracted
+    // its own owned pixel buffers via to_rgba8()/to_rgb8(), so this doesn't race with it.
+    let thumb_bytes = resize_to_jpeg(img, 200)?;
+    std::fs::write(thumb_dest, &thumb_bytes).map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
@@ -59,23 +90,28 @@ pub fn set_project_cover(
     image_path: String,
     state: tauri::State<DbState>,
     app_handle: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<CoverResult, String> {
     let dest = covers_dir(&app_handle)?.join(format!("{project_id}.jpg"));
+    let thumb_dest = cover_thumbnails_dir(&app_handle)?.join(format!("{project_id}.jpg"));
 
     let source_bytes = std::fs::read(&image_path).map_err(|e| e.to_string())?;
-    encode_cover(&source_bytes, &dest)?;
+    encode_cover(&source_bytes, &dest, &thumb_dest)?;
 
     let cover_path = dest.to_string_lossy().to_string();
+    let cover_thumbnail_path = thumb_dest.to_string_lossy().to_string();
 
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     // Uploading a new local image replaces any previous Anilist association.
     conn.execute(
-        "UPDATE projects SET cover_path = ?1, anilist_id = NULL, cover_title = NULL WHERE id = ?2",
-        params![cover_path, project_id],
+        "UPDATE projects SET cover_path = ?1, cover_thumbnail_path = ?2, anilist_id = NULL, cover_title = NULL WHERE id = ?3",
+        params![cover_path, cover_thumbnail_path, project_id],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(cover_path)
+    Ok(CoverResult {
+        cover_path,
+        cover_thumbnail_path,
+    })
 }
 
 /// Fetch the cover image from the Anilist GraphQL API using a manga ID.
@@ -168,15 +204,27 @@ pub async fn fetch_anilist_cover(
 
     let cover_path = dest.to_string_lossy().to_string();
 
-    // Step 4: persist to DB
+    // Step 4: generate the small UI-display thumbnail. Unlike the master above, this does
+    // require a decode — there's no way to shrink a JPEG without decoding it first.
+    let thumb_dest = cover_thumbnails_dir(&app_handle)?.join(format!("{project_id}.jpg"));
+    let img = image::load_from_memory(&img_bytes).map_err(|e| e.to_string())?;
+    let thumb_bytes = resize_to_jpeg(img, 200)?;
+    std::fs::write(&thumb_dest, &thumb_bytes).map_err(|e| e.to_string())?;
+    let cover_thumbnail_path = thumb_dest.to_string_lossy().to_string();
+
+    // Step 5: persist to DB
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE projects SET cover_path = ?1, anilist_id = ?2, cover_title = ?3 WHERE id = ?4",
-        params![cover_path, anilist_id, title, project_id],
+        "UPDATE projects SET cover_path = ?1, cover_thumbnail_path = ?2, anilist_id = ?3, cover_title = ?4 WHERE id = ?5",
+        params![cover_path, cover_thumbnail_path, anilist_id, title, project_id],
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(AnilistResult { title, cover_path })
+    Ok(AnilistResult {
+        title,
+        cover_path,
+        cover_thumbnail_path,
+    })
 }
 
 /// Remove the project cover: deletes the file and clears DB fields.
@@ -190,10 +238,14 @@ pub fn remove_project_cover(
     if dest.exists() {
         std::fs::remove_file(&dest).map_err(|e| e.to_string())?;
     }
+    let thumb_dest = cover_thumbnails_dir(&app_handle)?.join(format!("{project_id}.jpg"));
+    if thumb_dest.exists() {
+        std::fs::remove_file(&thumb_dest).map_err(|e| e.to_string())?;
+    }
 
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE projects SET cover_path = NULL, anilist_id = NULL, cover_title = NULL WHERE id = ?1",
+        "UPDATE projects SET cover_path = NULL, cover_thumbnail_path = NULL, anilist_id = NULL, cover_title = NULL WHERE id = ?1",
         params![project_id],
     )
     .map_err(|e| e.to_string())?;

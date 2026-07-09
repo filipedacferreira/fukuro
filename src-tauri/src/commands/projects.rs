@@ -21,6 +21,7 @@ pub struct Project {
     pub created_at: i64,
     pub chapter_count: i64,
     pub cover_path: Option<String>,
+    pub cover_thumbnail_path: Option<String>,
     pub anilist_id: Option<i64>,
     pub cover_title: Option<String>,
 }
@@ -59,7 +60,7 @@ pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, Stri
     let mut stmt = conn
         .prepare(
             "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
-                    p.cover_path, p.anilist_id, p.cover_title
+                    p.cover_path, p.anilist_id, p.cover_title, p.cover_thumbnail_path
              FROM projects p
              LEFT JOIN chapters c ON c.project_id = p.id
              GROUP BY p.id
@@ -82,6 +83,7 @@ pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, Stri
                 cover_path: row.get(5)?,
                 anilist_id: row.get(6)?,
                 cover_title: row.get(7)?,
+                cover_thumbnail_path: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -129,17 +131,23 @@ pub fn delete_project(
 ) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
 
-    let (root_path, cover_path): (String, Option<String>) = conn
-        .query_row(
-            "SELECT root_path, cover_path FROM projects WHERE id = ?1",
+    let (root_path, cover_path, cover_thumbnail_path): (String, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT root_path, cover_path, cover_thumbnail_path FROM projects WHERE id = ?1",
             params![id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|e| e.to_string())?;
 
     std::fs::remove_dir_all(&root_path).map_err(|e| e.to_string())?;
 
-    cleanup_project_assets(&conn, &app_handle, &id, cover_path.as_deref())?;
+    cleanup_project_assets(
+        &conn,
+        &app_handle,
+        &id,
+        cover_path.as_deref(),
+        cover_thumbnail_path.as_deref(),
+    )?;
     conn.execute("DELETE FROM projects WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
 
@@ -171,9 +179,13 @@ pub(crate) fn cleanup_project_assets(
     app_handle: &AppHandle,
     project_id: &str,
     cover_path: Option<&str>,
+    cover_thumbnail_path: Option<&str>,
 ) -> Result<(), String> {
     if let Some(cover_path) = cover_path {
         let _ = std::fs::remove_file(cover_path); // ignore error if already gone
+    }
+    if let Some(cover_thumbnail_path) = cover_thumbnail_path {
+        let _ = std::fs::remove_file(cover_thumbnail_path); // ignore error if already gone
     }
 
     let chapter_ids: Vec<String> = {
@@ -262,16 +274,17 @@ pub(crate) fn remove_missing_projects(
     conn: &Connection,
     app_handle: &AppHandle,
 ) -> Result<bool, String> {
-    let projects: Vec<(String, String, Option<String>)> = {
+    let projects: Vec<(String, String, Option<String>, Option<String>)> = {
         let mut stmt = conn
-            .prepare("SELECT id, root_path, cover_path FROM projects")
+            .prepare("SELECT id, root_path, cover_path, cover_thumbnail_path FROM projects")
             .map_err(|e| e.to_string())?;
-        let result: Vec<(String, String, Option<String>)> = stmt
+        let result: Vec<(String, String, Option<String>, Option<String>)> = stmt
             .query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
                 ))
             })
             .map_err(|e| e.to_string())?
@@ -280,16 +293,22 @@ pub(crate) fn remove_missing_projects(
         result
     };
 
-    let missing: Vec<(String, Option<String>)> = projects
+    let missing: Vec<(String, Option<String>, Option<String>)> = projects
         .into_iter()
-        .filter(|(_, root_path, _)| !Path::new(root_path).is_dir())
-        .map(|(id, _, cover_path)| (id, cover_path))
+        .filter(|(_, root_path, _, _)| !Path::new(root_path).is_dir())
+        .map(|(id, _, cover_path, cover_thumbnail_path)| (id, cover_path, cover_thumbnail_path))
         .collect();
 
     let removed_any = !missing.is_empty();
 
-    for (project_id, cover_path) in &missing {
-        cleanup_project_assets(conn, app_handle, project_id, cover_path.as_deref())?;
+    for (project_id, cover_path, cover_thumbnail_path) in &missing {
+        cleanup_project_assets(
+            conn,
+            app_handle,
+            project_id,
+            cover_path.as_deref(),
+            cover_thumbnail_path.as_deref(),
+        )?;
         conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])
             .map_err(|e| e.to_string())?;
     }
