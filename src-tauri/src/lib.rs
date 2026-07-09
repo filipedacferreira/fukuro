@@ -40,8 +40,15 @@ pub fn run() {
             app.manage(DbState(Mutex::new(conn)));
 
             // Holds the active folder watcher (see commands/watch.rs). Starts empty —
-            // watching begins only once a project is opened in the editor.
+            // populated below once we know whether a library root is already configured.
             app.manage(commands::watch::WatcherState(Mutex::new(None)));
+
+            // If the user already configured a library root in a previous session, start
+            // watching it immediately so the projects list is live as soon as it's shown.
+            // No-op (returns Ok without starting anything) if no root is configured yet —
+            // that happens instead from `set_library_root` once the user picks one.
+            commands::watch::start_library_watcher(&app.handle())
+                .expect("could not start library watcher");
 
             // Build the native OS menu bar.
             let menu = MenuBuilder::new(app)
