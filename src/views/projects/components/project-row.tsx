@@ -85,7 +85,7 @@ interface ProjectDeleteDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   name: string
-  onDelete: () => void
+  onDelete: () => Promise<void>
 }
 
 const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
@@ -93,34 +93,66 @@ const ProjectDeleteDialog: FC<ProjectDeleteDialogProps> = ({
   onOpenChange,
   name,
   onDelete,
-}) => (
-  <Dialog open={open} onOpenChange={onOpenChange}>
-    <Dialog.Content className="w-96">
-      <Dialog.Title className="wrap-break-word">
-        Delete &ldquo;{name}&rdquo;?
-      </Dialog.Title>
-      <Dialog.Description>
-        This permanently deletes the folder and all its chapters from your disk.
-        This can't be undone.
-      </Dialog.Description>
-      <Dialog.Actions>
-        <Dialog.Close asChild>
-          <Button variant="destructive" onClick={onDelete}>
+}) => {
+  const [deleting, setDeleting] = useState(false)
+
+  const handleConfirm = async () => {
+    setDeleting(true)
+    try {
+      await onDelete()
+      onOpenChange(false) // close only once the delete actually succeeded
+    } catch {
+      // Already toasted by the caller (project-list.tsx's handleDelete) — just stop the
+      // loading state and leave the dialog open so the user can retry or cancel.
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && deleting) return // ignore Escape/backdrop-close mid-delete
+        onOpenChange(next)
+      }}
+    >
+      <Dialog.Content className="w-96">
+        <Dialog.Title className="wrap-break-word">
+          Delete &ldquo;{name}&rdquo;?
+        </Dialog.Title>
+        <Dialog.Description>
+          This permanently deletes the folder and all its chapters from your
+          disk. This can't be undone.
+        </Dialog.Description>
+        <Dialog.Actions>
+          {/* Not wrapped in Dialog.Close: Foundations' Slot always lets a child's own
+              onClick override Close's (last props spread wins), so a button that both
+              performs an action and closes the dialog can't use asChild here — it has to
+              close explicitly, only once the delete succeeds (see handleConfirm above). */}
+          <Button
+            variant="destructive"
+            onClick={handleConfirm}
+            isLoading={deleting}
+            disabled={deleting}
+          >
             Delete
           </Button>
-        </Dialog.Close>
-        <Dialog.Close asChild>
-          <Button variant="outline">Cancel</Button>
-        </Dialog.Close>
-      </Dialog.Actions>
-    </Dialog.Content>
-  </Dialog>
-)
+          <Dialog.Close asChild>
+            <Button variant="outline" disabled={deleting}>
+              Cancel
+            </Button>
+          </Dialog.Close>
+        </Dialog.Actions>
+      </Dialog.Content>
+    </Dialog>
+  )
+}
 
 interface ProjectRowProps {
   project: Project
   onOpen: (project: Project) => void
-  onDelete: () => void
+  onDelete: () => Promise<void>
   onRename: (id: string, newName: string) => void
 }
 

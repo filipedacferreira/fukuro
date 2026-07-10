@@ -80,11 +80,15 @@ export const ImageCard: FC<ImageCardProps> = ({
               cannot be undone.
             </Dialog.Description>
             <Dialog.Actions>
-              <Dialog.Close asChild>
-                <Button variant="destructive" onClick={onDelete}>
-                  Delete file
-                </Button>
-              </Dialog.Close>
+              {/* Not wrapped in Dialog.Close: Foundations' Slot always lets a child's own
+                  onClick override Close's, so it wouldn't do anything here anyway. Not an
+                  active bug like ProjectDeleteDialog's, though — `onDelete` removes this
+                  image from its parent's list optimistically (see image-grid.tsx's
+                  handleHardDelete), which unmounts this card, and the dialog with it, on
+                  click regardless. */}
+              <Button variant="destructive" onClick={onDelete}>
+                Delete file
+              </Button>
               <Dialog.Close asChild>
                 <Button variant="outline">Cancel</Button>
               </Dialog.Close>

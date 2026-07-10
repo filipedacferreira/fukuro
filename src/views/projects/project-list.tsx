@@ -21,6 +21,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
+  const [switchingLibrary, setSwitchingLibrary] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
 
   useEffect(() => {
@@ -85,15 +86,19 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
 
   const confirmChangeLibrary = async () => {
     if (!pendingRoot) return
+    setSwitchingLibrary(true)
     try {
       const newProjects = await api.setLibraryRoot(pendingRoot)
       setLibraryRootState(pendingRoot)
       setProjects(newProjects)
+      setPendingRoot(null) // closes the dialog on success — see ChangeLibraryDialog for why
     } catch (e) {
       toast({
         title: 'Failed to switch library folder',
         description: String(e),
       })
+    } finally {
+      setSwitchingLibrary(false)
     }
   }
 
@@ -150,6 +155,10 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         description: String(e),
         variant: 'negative',
       })
+      // Re-thrown so ProjectDeleteDialog (which awaits this) knows the delete failed and
+      // keeps itself open instead of closing — see its own comment for why it can't rely
+      // on Dialog.Close for that.
+      throw e
     }
   }
 
@@ -216,10 +225,11 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
       <ChangeLibraryDialog
         open={pendingRoot !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingRoot(null)
+          if (!open && !switchingLibrary) setPendingRoot(null)
         }}
         newRoot={pendingRoot}
         onConfirm={confirmChangeLibrary}
+        switching={switchingLibrary}
       />
     </div>
   )
@@ -278,6 +288,7 @@ interface ChangeLibraryDialogProps {
   onOpenChange: (open: boolean) => void
   newRoot: string | null
   onConfirm: () => void
+  switching: boolean
 }
 
 const ChangeLibraryDialog: FC<ChangeLibraryDialogProps> = ({
@@ -285,6 +296,7 @@ const ChangeLibraryDialog: FC<ChangeLibraryDialogProps> = ({
   onOpenChange,
   newRoot,
   onConfirm,
+  switching,
 }) => (
   <Dialog open={open} onOpenChange={onOpenChange}>
     <Dialog.Content className="w-96">
@@ -296,13 +308,22 @@ const ChangeLibraryDialog: FC<ChangeLibraryDialogProps> = ({
         won't be touched.
       </Dialog.Description>
       <Dialog.Actions>
+        {/* Not wrapped in Dialog.Close: Foundations' Slot always lets a child's own
+            onClick override Close's (last props spread wins), so a button that both
+            performs an action and closes the dialog can't use asChild here — it has to
+            close explicitly, only once the switch succeeds (see confirmChangeLibrary). */}
+        <Button
+          variant="destructive"
+          onClick={onConfirm}
+          isLoading={switching}
+          disabled={switching}
+        >
+          Switch folder
+        </Button>
         <Dialog.Close asChild>
-          <Button variant="destructive" onClick={onConfirm}>
-            Switch folder
+          <Button variant="outline" disabled={switching}>
+            Cancel
           </Button>
-        </Dialog.Close>
-        <Dialog.Close asChild>
-          <Button variant="outline">Cancel</Button>
         </Dialog.Close>
       </Dialog.Actions>
     </Dialog.Content>
