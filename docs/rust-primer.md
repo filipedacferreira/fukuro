@@ -110,7 +110,7 @@ When a command needs to stream *different kinds* of events (progress, success, e
 
 ```rust
 #[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum ExportEvent {
     Progress { current: u32, total: u32 },
     Done { output_path: String },
@@ -134,6 +134,14 @@ type ExportEvent =
 ```
 
 The `Channel<ExportEvent>` generic on the Rust side and `Channel<ExportEvent>` on the TS side agree on the shape, so each `on_event.send(...)` call is type-safe end-to-end.
+
+**`rename_all` on an enum only renames the tag, not the fields inside each variant.** This one cost real debugging time: `#[serde(rename_all = "camelCase")]` on an enum controls how variant *names* become the `"type"` value (`Progress` → `"progress"`) — it does **not** touch the field names declared inside a struct-like variant. `Done { output_path: String }` still serialises as `{ "type": "done", "output_path": "..." }`, snake_case field and all, even with `rename_all = "camelCase"` sitting right above it. The fix is a second, differently-named attribute: `rename_all_fields = "camelCase"`, which does for variant fields what `rename_all` does for struct fields — both are needed together on an enum that has any multi-word field name:
+
+```rust
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
+```
+
+This bug can sit latent for a long time because it only breaks when the frontend actually reads the affected field — `ExportEvent::Done`'s `output_path` was silently serialising wrong from the very first version of this file, but nothing ever broke because every caller used the local `outputPath` variable it already had instead of reading `event.outputPath`. It surfaced for real once `SyncAllEvent::Progress`'s `project_id` field was read directly off the event (`event.projectId`) to route a per-project UI update — the field came through as `undefined` (not present under that name), with no error thrown anywhere, since accessing a missing property on an object is `undefined`, not a crash. If a Channel event ever reads back `undefined` for a field you know the Rust side sent, check for this before anything else.
 
 ---
 
@@ -417,6 +425,67 @@ Key points:
 
 ---
 
+## The `windows` crate — calling Win32 APIs directly
+
+`std` has no cross-platform "how much free space does this drive have" or "what's this drive's volume label" API — there's nothing to reach for except the OS itself. `kobo.rs`'s device probing calls straight into Win32 via the official `windows` crate (`windows-rs`), which is a thin, faithful binding: the function names, parameter order, and quirks are exactly what you'd find in Microsoft's own documentation.
+
+```rust
+use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+use windows::core::PCWSTR;
+
+let wide_path: Vec<u16> = "E:\\".encode_utf16().chain(std::iter::once(0)).collect();
+let path_ptr = PCWSTR(wide_path.as_ptr());
+
+let mut free_bytes: u64 = 0;
+let mut total_bytes: u64 = 0;
+let ok = unsafe {
+    GetDiskFreeSpaceExW(path_ptr, Some(&mut free_bytes), Some(&mut total_bytes), None)
+}
+.is_ok();
+```
+
+A few things that look unfamiliar the first time:
+
+- **Every raw Win32 call is `unsafe`.** The compiler can't verify a C API's contract — that a pointer is valid, a buffer is large enough, a string is properly terminated — so `unsafe` is the programmer vouching for that instead. A comment right above/inside the block explaining *why* it's sound (as in `kobo.rs`) is expected here, the same way `?` needs no explanation but an `unsafe` block always does.
+- **`PCWSTR` is "pointer to a constant wide string".** Windows' native string ABI is UTF-16, not UTF-8 — every string crossing into a `*W` (wide) function has to be re-encoded with `.encode_utf16()`, and given an explicit null terminator (`.chain(std::iter::once(0))`) since these C-style buffers are null-terminated rather than length-prefixed like Rust's `String`. The `Vec<u16>` (`wide_path`) has to be kept alive in its own variable for as long as the `PCWSTR` pointing into it is used — `PCWSTR` is just a raw pointer with no ownership of its own.
+- **Output parameters are `Option<&mut T>`.** `None` opts out of a value you don't need (windows-rs turns that into a null pointer on the C side); `Some(&mut x)` is where the call writes its result. `GetVolumeInformationW` (used for the drive label) takes several of these — this codebase only ever fills in the ones it actually reads.
+- **Return values are typed, not raw integers.** Rather than the C convention of returning a `BOOL`/`HRESULT` you'd manually check, windows-rs wraps them in something with `.is_ok()`/`.is_err()`, so error handling reads like any other Rust `Result`-shaped API.
+
+---
+
+## Chunked I/O with a progress callback
+
+Every other file operation in this codebase is all-or-nothing — `std::fs::read`, `std::fs::write`, `std::fs::copy` — which is fine when the operation is fast enough that reporting progress wouldn't mean anything. Copying a `.cbz` onto a Kobo over USB doesn't fit that: it can take long enough that a silent multi-second pause reads as a hang. `kobo.rs`'s `copy_with_progress` reads and writes in fixed-size chunks instead of calling `std::fs::copy` once, invoking a callback after each chunk:
+
+```rust
+fn copy_with_progress(
+    src: &str,
+    dest: &Path,
+    mut on_progress: impl FnMut(u64, u64),
+) -> Result<(), String> {
+    let mut src_file = std::fs::File::open(src).map_err(|e| e.to_string())?;
+    let total = src_file.metadata().map_err(|e| e.to_string())?.len();
+    let mut dest_file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+
+    let mut buf = [0u8; 1024 * 1024]; // 1 MiB chunks
+    let mut copied: u64 = 0;
+    loop {
+        let n = src_file.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break; // EOF
+        }
+        dest_file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        copied += n as u64;
+        on_progress(copied, total);
+    }
+    Ok(())
+}
+```
+
+`impl FnMut(u64, u64)` is the same shape `write_cbz_archive` (export.rs) uses for its own per-page progress callback — the caller passes a plain closure (usually one that sends a Tauri Channel event), and the compiler generates a dedicated, inlined copy of `copy_with_progress` for whatever closure type is passed in (monomorphisation), rather than paying for dynamic dispatch through a `Box<dyn FnMut>`. `read()` returning `0` is the standard Rust I/O convention for end-of-file — it's not an error, just the loop's exit condition.
+
+---
+
 ## `notify` — filesystem watching from a background thread
 
 `commands/watch.rs` watches the entire configured library root — both the manga level (its immediate subfolders) and the chapter level (each manga's immediate subfolders) — for the whole app session, so adding/removing manga or chapter folders never requires restarting or re-importing anything.
@@ -511,6 +580,51 @@ let mut guard = watcher_state.0.lock().map_err(|e| e.to_string())?;
 **Deduplicating events**
 
 Filesystem watchers commonly fire multiple events for a single logical change (e.g. `Create` followed by a `Modify` as the OS finishes writing metadata), and notify's Windows backend reports generic `Create(CreateKind::Any)` / `Remove(RemoveKind::Any)` rather than distinguishing files from folders. Rather than trying to parse event details precisely, the handler just re-runs the same rescan logic used by `list_projects`/`get_project_chapters`: `insert_new_projects`/`insert_new_chapters` add any subfolder not yet in the DB, and `remove_missing_projects`/`remove_missing_chapters` delete any row whose folder no longer exists on disk. All four dedupe against actual DB/disk state, so redundant events end up as no-op rescans — and deleting a manga or chapter folder outside the app removes it automatically (no confirmation prompt, since the deletion already happened on disk).
+
+---
+
+## Polling a background `Mutex` — when there's no event to hook into
+
+`notify` works because Windows has an OS-level API (`ReadDirectoryChangesW`) that pushes an event when a watched folder changes. There's no equivalent for "a USB drive was just plugged in" that this codebase hooks into, so `kobo.rs`'s device detection falls back to the older, blunter technique: check periodically.
+
+```rust
+pub struct KoboDeviceState(pub Mutex<Option<KoboDevice>>);
+
+pub fn start_kobo_watcher(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            let detected = detect_kobo_device();
+
+            let changed = {
+                let state = app.state::<KoboDeviceState>();
+                let mut guard = state.0.lock().unwrap();
+                if *guard != detected {
+                    *guard = detected.clone();
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if changed {
+                let _ = app.emit("kobo-device-changed", detected);
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
+    });
+}
+```
+
+This is a variation on the `Mutex`-guarded managed state already covered above (`DbState`, `WatcherState`) — the difference is what the `Mutex` holds. `WatcherState` holds a *handle to something else doing the watching* (a `RecommendedWatcher`); `KoboDeviceState` holds the *result of the last check* (`Option<KoboDevice>`), refreshed by a plain loop-and-sleep thread rather than an OS callback.
+
+Two details make this friendlier than a naive poll-and-report loop:
+
+- **Only write and emit on an actual change** (`if *guard != detected`, which is why `KoboDevice` derives `PartialEq`). Without this check, a Kobo sitting connected and idle would fire a `kobo-device-changed` event every 3 seconds for no reason.
+- **A synchronous command reads the same state for the initial render.** `get_kobo_device` just locks the `Mutex` and returns a clone — no polling of its own. This mirrors `get_library_root` + `projects-updated`: a cheap synchronous "give me what you've got right now" call for mount, paired with an event for everything that happens after.
+
+`std::thread::sleep` blocking this thread for 3 seconds is fine precisely because it's a dedicated background thread doing nothing else — the same reasoning that makes blocking OK inside `std::thread::spawn` elsewhere in this codebase (thumbnail generation, CBZ export), just applied to a loop instead of a one-shot task.
 
 ---
 

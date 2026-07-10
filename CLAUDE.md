@@ -20,6 +20,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 | Cover metadata source | [Anilist](https://anilist.co) GraphQL API (public, no key) |
 | Title similarity | `strsim` (Jaro-Winkler) |
 | Title cleanup | `regex` |
+| Kobo device info | `windows` crate (raw Win32: `GetVolumeInformationW`, `GetDiskFreeSpaceExW`) |
 
 ## Project structure
 
@@ -27,17 +28,24 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 src/
   app.tsx                         # Top-level view router (projects ↔ editor); holds View union state
   main.tsx                        # React entry point
-  types.ts                        # Shared TS types (Project, CoverInfo, AnilistCandidate, BackfillEvent, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
+  types.ts                        # Shared TS types (Project, CoverInfo, AnilistCandidate, BackfillEvent, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent, KoboDevice, SyncEvent, SyncAllEvent)
   index.css                       # Tailwind v4 + Foundations CSS tokens
   lib/
     tauri.ts                      # Typed invoke() wrappers for all Rust commands
     validation.ts                 # Shared zod schemas (renameSchema / RenameValues)
+    kobo.ts                       # getKoboSyncStatus, formatBytes, formatRelativeTime
     utils/classnames.ts           # CVA + tailwind-merge setup (cn, cva)
+  hooks/
+    use-kobo-device.ts             # Tracks the connected Kobo device: get_kobo_device seed + kobo-device-changed listener
+    use-kobo-sync.ts               # Drives one project's "Send to device" flow; shared by ProjectRow's menu item and ExportPanel
+    use-element-transition.ts     # Foundations hook (copied from foundations.significa.co)
+    use-top-layer.ts              # Foundations hook (copied from foundations.significa.co)
   views/
     projects/                     # Projects list view
       project-list.tsx            # Home screen: library-root onboarding, live project list, ChangeLibraryDialog
       components/
-        project-row.tsx           # Project card + ProjectRenameDialog + ProjectDeleteDialog
+        project-row.tsx            # Project card + ProjectRenameDialog + ProjectDeleteDialog; "Send to device" lives in its dropdown menu
+        kobo-device-badge.tsx      # Header badge: up-to-date/outdated indicator + popover with device info and Sync all
     editor/                       # Editor view
       editor.tsx                  # Main workspace: chapter list + export panel
       components/
@@ -46,16 +54,13 @@ src/
         chapter-row.tsx           # Chapter header row: drag handle, inline rename, image count
         image-grid.tsx            # Thumbnail grid with exclusion toggle + streaming optimiser
         image-card.tsx            # Single image card with exclude toggle + delete dialog
-        export-panel.tsx          # Save dialog + export button
+        export-panel.tsx          # Save dialog + Export CBZ button + Send to device button
   components/
     ui/                           # Significa Foundations UI (copied, not installed)
-      slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx
+      slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx menu.tsx popover.tsx
       field.tsx input.tsx modal.tsx progress.tsx skeleton.tsx spinner.tsx toaster.tsx tooltip.tsx
     cover-dialog.tsx              # Shared cover dialog; accepts projectId + cover: CoverInfo + onCoverChange: (CoverInfo) => void
     cover-thumbnail.tsx           # Shared cover button (sm/lg sizes); used in editor header + project cards
-  hooks/                          # Foundations hooks (copied from foundations.significa.co)
-    use-element-transition.ts
-    use-top-layer.ts
   utils/                          # Foundations utils (copied from foundations.significa.co)
     compose-refs.ts
     next-frame.ts
@@ -63,17 +68,18 @@ src/
 src-tauri/src/
   lib.rs                          # Tauri builder: plugin init, DB setup, command registry, native menu
   db.rs                           # DbState type + SQLite schema migration
-  utils.rs                        # Shared helpers: is_image_file, natural_sort_key
+  utils.rs                        # Shared helpers: is_image_file, natural_sort_key, now_unix
   commands/
     mod.rs
     settings.rs                   # get_library_root, set_library_root; read_library_root helper
-    projects.rs                   # list_projects, delete_project, rename_project, get_project_chapters, insert/remove_new_*_projects, cleanup_project_assets
+    projects.rs                   # list_projects, delete_project, rename_project, get_project_chapters, insert/remove_new_*_projects, cleanup_project_assets, clear_stale_export_paths
     chapters.rs                   # reorder_chapters, rename_chapter
-    images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image
+    images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image, invalidate_export
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
-    export.rs                     # create_cbz
+    export.rs                     # create_cbz; collect_cbz_source/write_cbz_archive (shared with kobo.rs's sync)
     cover.rs                      # set_project_cover, search/apply_anilist_cover, auto_fill_missing_covers, remove_project_cover, CoverLookupSemaphore
     watch.rs                      # start_library_watcher (plain fn, not a command) + WatcherState
+    kobo.rs                       # get_kobo_device, sync_project_to_kobo, sync_all_to_kobo, start_kobo_watcher (plain fn) + KoboDeviceState
 ```
 
 ## Database
@@ -82,12 +88,15 @@ SQLite at `{AppData}/fukuro.db`.
 
 ```sql
 settings       (key, value)  -- key-value store; currently one row, key='library_root'
-projects       (id, root_path, name, created_at, cover_path, cover_thumbnail_path, anilist_id, cover_title)
+projects       (id, root_path, name, created_at, cover_path, cover_thumbnail_path, anilist_id, cover_title,
+                 last_export_path, last_exported_at, last_kobo_export_at, last_synced_at)
 chapters       (id, project_id→projects, folder_path, display_name, sort_order, image_count)
 excluded_images(chapter_id→chapters, image_path)  -- soft-delete exclusions
 ```
 
 `cover_path`, `cover_thumbnail_path`, `anilist_id`, and `cover_title` are nullable — added via `ALTER TABLE` migrations in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`). `anilist_id` briefly became `mangaupdates_id` (renamed via `ALTER TABLE ... RENAME COLUMN`) when the cover source was switched to MangaUpdates, then renamed back once that switch turned out to serve much lower-resolution cover images than Anilist; both renames cleared the column's existing values, since neither provider's ID space corresponds to the other's.
+
+`last_export_path`/`last_exported_at` (Export history, the user's own "Export CBZ" file) and `last_kobo_export_at`/`last_synced_at` (Kobo sync's independent AppData cache) are all nullable INTEGER/TEXT columns added the same way — Unix epoch seconds rather than an ISO string, since nothing else in this codebase needs a date/time crate. See **Kobo sync** below for why the two pairs are deliberately unrelated.
 
 The `settings` table's presence also gates a one-time fresh-reset migration: databases from before the single-library-root rearchitecture (no `settings` table) have their `projects`/`chapters`/`excluded_images` tables dropped on next launch rather than migrated in place, since old projects each had an independently-picked `root_path` that the new "one watched root, auto-scanned" model can't reconcile. Everything is rebuilt from disk once the user (re-)configures a library root.
 
@@ -101,7 +110,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 |---|---|
 | `get_library_root()` | Returns the configured library root path, or `null` if none is set yet |
 | `set_library_root(rootPath)` | Wipes all existing projects (and their cached covers/thumbnails), points the app at `rootPath`, scans its immediate subfolders as projects (each with its own chapters), restarts the library watcher, and returns the fresh project list |
-| `list_projects()` | Rescans the library root (new manga subfolders inserted, missing ones removed) and returns projects ordered by `created_at DESC`; returns `[]` if no library root is configured |
+| `list_projects()` | Rescans the library root (new manga subfolders inserted, missing ones removed) and returns projects ordered by `created_at DESC`; returns `[]` if no library root is configured. Also clears `last_export_path`/`last_exported_at` for any project whose exported file has been deleted externally (`clear_stale_export_paths`) |
 | `delete_project(id)` | **Permanently deletes the manga's folder from disk** (`fs::remove_dir_all`), then cascade-deletes its DB row (chapters + exclusions) and cleans up its cached cover/thumbnails. If the folder can't be removed (e.g. a file inside is open elsewhere), the error is returned and the DB row is left untouched |
 | `rename_project(id, name)` | Update project display name (does not rename the folder on disk) |
 | `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, and deletes chapters whose folder no longer exists |
@@ -112,12 +121,15 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + thumbnail cache cleanup + DB cleanup |
 | `generate_chapter_thumbnails_stream(chapterId, onEvent)` | Spawns background thread; generates thumbnails in parallel via rayon and streams `ThumbnailUpdate` events through a Tauri Channel |
 | `clear_thumbnail_cache()` | Deletes `{AppData}/thumbnails/` entirely (dev menu action) |
-| `create_cbz(projectId, outputPath, onEvent)` | Zip all non-excluded images in chapter/page order; streams `progress` / `done` / `error` events via Channel; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
+| `create_cbz(projectId, outputPath, onEvent)` | Zip all non-excluded images in chapter/page order; streams `progress` / `done` / `error` events via Channel; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg`. On success, updates `last_export_path`/`last_exported_at` on the project |
 | `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100 into `{AppData}/covers/`, plus a 200px-wide thumbnail into `{AppData}/covers/thumbnails/`, update DB; returns `{ coverPath, coverThumbnailPath }` |
 | `search_anilist_covers(query)` | Search Anilist's public GraphQL API by title, return up to 5 `AnilistCandidate`s (`anilistId`, `title`, `year`, `thumbnailUrl`, `imageUrl`) for the manual picker in `CoverDialog` |
 | `apply_anilist_cover(projectId, anilistId, imageUrl, title)` | Download `imageUrl` and write it verbatim as the master (Anilist always serves JPEG, so no lossy re-encode), plus a re-encoded 200px-wide thumbnail; update DB with `anilist_id`/`cover_title`; returns `{ coverPath, coverThumbnailPath }` |
 | `auto_fill_missing_covers(onEvent)` | Runs the automatic lookup (see below) for every project with no cover; streams `{ current, total, applied }` progress and a final `{ applied, total }` summary through a Channel |
 | `remove_project_cover(projectId)` | Delete cover + thumbnail files and clear `cover_path`/`cover_thumbnail_path`/`anilist_id`/`cover_title` in DB |
+| `get_kobo_device()` | Returns the currently-known Kobo device (`{ drivePath, label, freeBytes, totalBytes }`) or `null`, read synchronously from the state the background poller keeps current — see **Kobo sync** below |
+| `sync_project_to_kobo(projectId, onEvent)` | Ensures a fresh `.cbz` in Kobo sync's own AppData cache (re-exporting first if needed), then copies it onto the connected Kobo with byte-level progress; streams `exporting` / `copying` / `done` / `error` via Channel. Never prompts for a save location |
+| `sync_all_to_kobo(onEvent)` | Runs the same sync for every project that's outdated or missing on the device, in sequence; streams a `progress`/`done` summary via Channel (no byte-level detail per project) |
 
 `start_library_watcher` (in `watch.rs`) is not an invokable command — it's a plain function called from `lib.rs`'s `setup()` at launch (if a library root is already configured) and from `set_library_root` whenever the root changes. It watches the entire library root recursively for the whole app session (both the manga level and the chapter level — see `docs/rust-primer.md`'s `notify` entry for how one recursive watch is scoped back to those two levels), replacing any previously active watcher. On a relevant `Create`/`Remove` event it rescans the affected level and emits either `projects-updated` (payload: the fresh `Project[]`) or `chapters-updated` (payload: the affected project id) — no confirmation, since the filesystem change already happened.
 
@@ -157,6 +169,42 @@ Project covers have their own parallel thumbnail, since `cover_path` is the mast
 2. Images without a cached thumbnail have `thumbnailPath === path` (original as fallback, shown blurred with a spinner)
 3. `generate_chapter_thumbnails_stream` runs in a detached thread, streams `{ imagePath, thumbnailPath }` via Channel
 4. Frontend swaps each image in as its thumbnail arrives; blur/spinner clears
+
+## Kobo sync
+
+Copies exported `.cbz` files onto a connected Kobo eReader and keeps them up to date as chapters/pages change.
+
+**Device detection**
+
+`kobo.rs`'s `start_kobo_watcher` runs a background thread (started in `lib.rs`'s `setup()`) that polls drive letters `A:`–`Z:` every 3 seconds for a `.kobo` marker directory at the drive root — the reliable cross-model signal a mounted drive is a Kobo, confirmed against a real device (volume label `KOBOeReader`). The result is kept in managed `KoboDeviceState` (`Mutex<Option<KoboDevice>>`) and only written/emitted (`kobo-device-changed`) when it actually changes. `get_kobo_device()` reads the same state synchronously so the frontend's `useKoboDevice` hook doesn't start blank for up to 3s on mount.
+
+**Local cache — deliberately not the user's exported file**
+
+Kobo sync never prompts for a save location, on either the per-project button or the bulk "Sync all". Instead `kobo_cache_path` (kobo.rs) writes its own `.cbz` to `{AppData}/kobo-exports/{project_id}.cbz` — a fixed, hidden location the user never picks or sees, the same way chapter thumbnails and cover images live under AppData rather than anywhere user-chosen. This is deliberately independent of `last_export_path`/`last_exported_at` (Export history's columns, set only by the user's own "Export CBZ" button): the two are now separate files on disk, so Kobo sync gets its own freshness timestamp, `last_kobo_export_at`, rather than reusing (and potentially fighting over) the export-history one. `cleanup_project_assets` (projects.rs) deletes this cache file alongside covers/thumbnails when a project is removed.
+
+**Destination**
+
+Synced files go to `{drive}\fukuro\{project_name}.cbz` on the device — a dedicated folder (created on first sync), not the device root or any existing sideload folder, so the "does this project already have a file on the device" scan in `sync_all_to_kobo` only ever has to look in one place. Kobo's Nickel software indexes `.cbz`/`.epub` files recursively regardless of folder structure, so no specific folder name is required by the device itself.
+
+**Outdated detection**
+
+A project reads as **outdated** (`getKoboSyncStatus` in `lib/kobo.ts`) whenever `lastKoboExportAt`/`lastSyncedAt` don't agree the device copy reflects the current cache — including the case where `lastKoboExportAt` is `null` because the cache was invalidated (see below) after a prior sync. Both null (never synced at all) shows no indicator. Note this compares against `lastKoboExportAt`, not `lastExportedAt` — the latter is Export history's own column and has no bearing on what's actually on the device.
+
+**Invalidating a stale cache**
+
+Excluding/including a page (`toggle_exclusion`) or permanently deleting one (`hard_delete_image`) changes what either cached `.cbz` would actually contain, so both call `invalidate_export` (images.rs) to null out the owning project's `last_exported_at` **and** `last_kobo_export_at` together — one action, two independent caches invalidated. `sync_project` (kobo.rs) treats a null `last_kobo_export_at` the same as a missing cache file — re-running `write_cbz_archive` before copying — rather than silently re-uploading a `.cbz` that no longer matches the chapter's current content.
+
+**Sync flow**
+
+`sync_project` (shared by both commands) always resolves the local file via `kobo_cache_path`, re-exporting into it if missing/stale, then chunked-copies it onto the device with byte-level progress (`copy_with_progress`; see `docs/rust-primer.md`'s entry on chunked I/O). `sync_all_to_kobo` runs this in sequence (not concurrently — one USB device, no benefit to parallelism) for every project that's outdated, missing from the device's `fukuro` folder, or invalidated since its last sync — every project is a candidate, since there's no save-location prompt to avoid in bulk anymore.
+
+**UI**
+
+- `KoboDeviceBadge` (project-list header, shown only when a device is connected): an up-to-date/outdated icon sits directly next to the trigger button, visible without opening anything; the popover itself shows device label/free space and a **Sync all** button
+- Per-project sync lives in `ProjectRow`'s `⋯` dropdown menu as a plain **Send to device** item (no separate status marker per row — the aggregate badge above is the single source of truth)
+- `ExportPanel` (editor) has its own **Send to device** button alongside **Export CBZ**, both driven by the shared `useKoboSync` hook
+
+**A gotcha worth knowing:** `SyncEvent`/`SyncAllEvent`/`ExportEvent`/`BackfillEvent` all need **both** `rename_all = "camelCase"` (renames the `type` tag) **and** `rename_all_fields = "camelCase"` (renames the fields inside each variant) — one without the other silently ships snake_case field names with no error anywhere. See `docs/rust-primer.md`'s "Tagged enums" entry for the full story.
 
 ## Native menu
 
