@@ -58,18 +58,6 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
     }
   }, [project.id])
 
-  const handleReorder = async (newChapters: Chapter[]) => {
-    setChapters(newChapters)
-    try {
-      await api.reorderChapters(newChapters.map((c) => c.id))
-    } catch (e) {
-      toast({
-        title: 'Failed to save order',
-        description: String(e),
-      })
-    }
-  }
-
   const handleExclusionChange = (chapterId: string, delta: number) => {
     setChapters((prev) =>
       prev.map((c) =>
@@ -139,7 +127,6 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
           ) : (
             <ChapterList
               chapters={chapters}
-              onReorder={handleReorder}
               onExclusionChange={handleExclusionChange}
               onImageDeleted={handleImageDeleted}
             />

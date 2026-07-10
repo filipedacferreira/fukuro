@@ -25,12 +25,6 @@ export const api = {
   getProjectChapters: (projectId: string) =>
     invoke<Chapter[]>('get_project_chapters', { projectId }),
 
-  reorderChapters: (chapterIds: string[]) =>
-    invoke<void>('reorder_chapters', { chapterIds }),
-
-  renameChapter: (id: string, name: string) =>
-    invoke<void>('rename_chapter', { id, name }),
-
   getChapterImages: (chapterId: string) =>
     invoke<ImageMeta[]>('get_chapter_images', { chapterId }),
 

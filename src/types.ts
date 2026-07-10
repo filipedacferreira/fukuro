@@ -32,6 +32,7 @@ export interface Chapter {
   projectId: string
   folderPath: string
   displayName: string
+  chapterNumber: number | null
   sortOrder: number
   imageCount: number
   excludedCount: number
