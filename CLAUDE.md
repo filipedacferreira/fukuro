@@ -17,6 +17,9 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 | Image decoding | `image` crate (jpeg, png, gif, webp) |
 | Thumbnail resize | `fast_image_resize` (SIMD-accelerated, bilinear) |
 | Parallel processing | `rayon` |
+| Cover metadata source | [Anilist](https://anilist.co) GraphQL API (public, no key) |
+| Title similarity | `strsim` (Jaro-Winkler) |
+| Title cleanup | `regex` |
 
 ## Project structure
 
@@ -24,7 +27,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 src/
   app.tsx                         # Top-level view router (projects ↔ editor); holds View union state
   main.tsx                        # React entry point
-  types.ts                        # Shared TS types (Project, CoverInfo, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
+  types.ts                        # Shared TS types (Project, CoverInfo, AnilistCandidate, BackfillEvent, Chapter, ImageMeta, ThumbnailUpdate, ExportEvent)
   index.css                       # Tailwind v4 + Foundations CSS tokens
   lib/
     tauri.ts                      # Typed invoke() wrappers for all Rust commands
@@ -69,7 +72,7 @@ src-tauri/src/
     images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
     export.rs                     # create_cbz
-    cover.rs                      # set_project_cover, fetch_anilist_cover, remove_project_cover
+    cover.rs                      # set_project_cover, search/apply_anilist_cover, auto_fill_missing_covers, remove_project_cover, CoverLookupSemaphore
     watch.rs                      # start_library_watcher (plain fn, not a command) + WatcherState
 ```
 
@@ -84,7 +87,7 @@ chapters       (id, project_id→projects, folder_path, display_name, sort_order
 excluded_images(chapter_id→chapters, image_path)  -- soft-delete exclusions
 ```
 
-`cover_path`, `cover_thumbnail_path`, `anilist_id`, and `cover_title` are nullable — added via `ALTER TABLE` migrations in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`).
+`cover_path`, `cover_thumbnail_path`, `anilist_id`, and `cover_title` are nullable — added via `ALTER TABLE` migrations in `db.rs` (guarded by `pragma_table_info` since SQLite has no `ADD COLUMN IF NOT EXISTS`). `anilist_id` briefly became `mangaupdates_id` (renamed via `ALTER TABLE ... RENAME COLUMN`) when the cover source was switched to MangaUpdates, then renamed back once that switch turned out to serve much lower-resolution cover images than Anilist; both renames cleared the column's existing values, since neither provider's ID space corresponds to the other's.
 
 The `settings` table's presence also gates a one-time fresh-reset migration: databases from before the single-library-root rearchitecture (no `settings` table) have their `projects`/`chapters`/`excluded_images` tables dropped on next launch rather than migrated in place, since old projects each had an independently-picked `root_path` that the new "one watched root, auto-scanned" model can't reconcile. Everything is rebuilt from disk once the user (re-)configures a library root.
 
@@ -111,10 +114,30 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `clear_thumbnail_cache()` | Deletes `{AppData}/thumbnails/` entirely (dev menu action) |
 | `create_cbz(projectId, outputPath, onEvent)` | Zip all non-excluded images in chapter/page order; streams `progress` / `done` / `error` events via Channel; if a cover is set, it is written as `0000.jpg` and chapter pages start at `0001.jpg` |
 | `set_project_cover(projectId, imagePath)` | Re-encode picked image as JPEG quality 100 into `{AppData}/covers/`, plus a 200px-wide thumbnail into `{AppData}/covers/thumbnails/`, update DB; returns `{ coverPath, coverThumbnailPath }` |
-| `fetch_anilist_cover(projectId, anilistId)` | Fetch cover from Anilist GraphQL API, store the master untouched (already JPEG) plus a re-encoded 200px-wide thumbnail; returns `{ title, coverPath, coverThumbnailPath }` |
+| `search_anilist_covers(query)` | Search Anilist's public GraphQL API by title, return up to 5 `AnilistCandidate`s (`anilistId`, `title`, `year`, `thumbnailUrl`, `imageUrl`) for the manual picker in `CoverDialog` |
+| `apply_anilist_cover(projectId, anilistId, imageUrl, title)` | Download `imageUrl` and write it verbatim as the master (Anilist always serves JPEG, so no lossy re-encode), plus a re-encoded 200px-wide thumbnail; update DB with `anilist_id`/`cover_title`; returns `{ coverPath, coverThumbnailPath }` |
+| `auto_fill_missing_covers(onEvent)` | Runs the automatic lookup (see below) for every project with no cover; streams `{ current, total, applied }` progress and a final `{ applied, total }` summary through a Channel |
 | `remove_project_cover(projectId)` | Delete cover + thumbnail files and clear `cover_path`/`cover_thumbnail_path`/`anilist_id`/`cover_title` in DB |
 
 `start_library_watcher` (in `watch.rs`) is not an invokable command — it's a plain function called from `lib.rs`'s `setup()` at launch (if a library root is already configured) and from `set_library_root` whenever the root changes. It watches the entire library root recursively for the whole app session (both the manga level and the chapter level — see `docs/rust-primer.md`'s `notify` entry for how one recursive watch is scoped back to those two levels), replacing any previously active watcher. On a relevant `Create`/`Remove` event it rescans the affected level and emits either `projects-updated` (payload: the fresh `Project[]`) or `chapters-updated` (payload: the affected project id) — no confirmation, since the filesystem change already happened.
+
+## Cover auto-lookup
+
+Every project gets an automatic attempt at an Anilist cover the moment it's first discovered on disk — no user action required. `insert_new_projects` (in `projects.rs`) returns the `(id, name)` of every project it just inserted; each of its three call sites (`list_projects`, `set_library_root`, and the watcher in `watch.rs`) then calls `cover::spawn_auto_cover_lookup` once per new project. This is fire-and-forget: the lookup runs in a detached `tauri::async_runtime::spawn` task so project discovery itself (which can mean scanning hundreds of folders at once, e.g. a first-time library import) never blocks on network I/O.
+
+The lookup itself (`try_auto_apply_cover`):
+1. Clean the folder name (`clean_title`) — strips `[...]`/`(...)` groups and volume/chapter range tokens (`v01-05`, `ch1-10`) via `regex`, since scanlation folder names rarely match a series title verbatim.
+2. Search Anilist (`Page { media(search: ..., type: MANGA) { ... } }`) for the cleaned title, take only the top hit.
+3. Compare the cleaned title against *both* the hit's English and romaji titles with `strsim::jaro_winkler` (case-insensitive), taking whichever is closer. Comparing only the (English-preferred) display title isn't enough — scanlation folder names are almost always romaji, and a manga's English localisation title can differ from it completely (e.g. "Kaoru Hana wa Rin to Saku" vs "The Fragrant Flower Blooms With Dignity"), which silently failed the threshold despite being the correct match. Below **0.85**, do nothing — silently, no toast, since there's no user watching a background lookup and a wrong auto-applied cover would be worse than none.
+4. Above the threshold, download and apply it the same way `apply_anilist_cover` does, then re-emit `projects-updated` so any open `ProjectList`/`ProjectRow` picks up the new cover live.
+
+This feature originally shipped against MangaUpdates' search API instead of Anilist's, but MangaUpdates' cover images turned out to be much lower resolution — see the column-rename history under `anilist_id` in the Database section above. The `clean_title` → search → similarity-gate → apply architecture is unchanged from that first version; only the HTTP calls and response parsing in `cover.rs` differ.
+
+All concurrent lookups — automatic and the manual `auto_fill_missing_covers` bulk backfill alike — share one `CoverLookupSemaphore` (capacity 4, managed state, initialised in `lib.rs`), so a large import or a bulk backfill never fires more than a handful of Anilist requests at once.
+
+Since automatic lookup only fires at discovery time, projects that already existed before this feature shipped (or whose lookup was skipped for low similarity) never get a retroactive attempt on their own — that's what `auto_fill_missing_covers` is for: the same lookup, run once for every project currently missing a cover, triggered manually from the "Auto-fill missing covers" button in `ProjectList`'s header.
+
+Manual override always remains available regardless of what automatic lookup did or didn't do: `CoverDialog`'s title search (`search_anilist_covers`) shows a picker of up to 5 candidates, and picking one calls `apply_anilist_cover` directly.
 
 ## Thumbnail cache
 

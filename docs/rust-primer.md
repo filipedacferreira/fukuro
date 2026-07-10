@@ -262,25 +262,35 @@ Tauri runs on a Tokio async runtime. `reqwest::blocking` tries to spin up its ow
 
 ```rust
 #[tauri::command]
-pub async fn fetch_anilist_cover(
-    project_id: String,
-    anilist_id: i64,
-    state: tauri::State<'_, DbState>,   // note the explicit lifetime
-    app_handle: tauri::AppHandle,
-) -> Result<AnilistResult, String> {
+pub async fn search_anilist_covers(
+    query: String,
+) -> Result<Vec<AnilistCandidate>, String> {
     let client = reqwest::Client::new();
     // ...
 }
 ```
 
-The `'_` lifetime on `tauri::State` is required for async commands — the compiler needs to know the state reference is tied to the function's lifetime, not `'static`.
+**Fetching managed state from a plain async fn, not just a command**
+
+`tauri::State<T>` extraction only works as a `#[tauri::command]` parameter — Tauri's macro is what wires it up. `cover.rs`'s Anilist lookup is shared by three call sites (the `apply_anilist_cover` command, the automatic per-project lookup, and the bulk backfill), so the actual DB-touching logic lives in a plain `async fn` that only has `&tauri::AppHandle` to work with:
+
+```rust
+async fn apply_cover_internal(app_handle: &tauri::AppHandle, /* ... */) -> Result<CoverResult, String> {
+    // ...
+    let db_state = app_handle.state::<DbState>(); // requires `use tauri::Manager;`
+    let conn = db_state.0.lock().map_err(|e| e.to_string())?;
+    // ...
+}
+```
+
+This is the same technique `watch.rs`'s filesystem event handler uses (see the `notify` entry below) — `AppHandle::state::<T>()` fetches the same managed state `tauri::State<T>` would have injected, just called explicitly instead of relying on command-parameter magic. Reach for it whenever async logic needs to be called from more than one place (a command *and* a background task, say), since only the outermost `#[tauri::command]` can use the `State<T>` parameter form.
 
 **POST with a JSON body**
 
 ```rust
 let response: serde_json::Value = client
     .post("https://graphql.anilist.co")
-    .json(&serde_json::json!({ "query": "...", "variables": { "id": 123 } }))
+    .json(&serde_json::json!({ "query": "...", "variables": { "search": query } }))
     .send()
     .await
     .map_err(|e| format!("Request failed: {e}"))?
@@ -298,10 +308,9 @@ let response: serde_json::Value = client
 `serde_json::Value` lets you traverse the response without declaring a struct:
 
 ```rust
-let title = response
-    .pointer("/data/Media/title/english")
-    .and_then(|v| v.as_str())
-    .unwrap_or("Unknown");
+let image_url = entry
+    .pointer("/coverImage/extraLarge")
+    .and_then(|v| v.as_str());
 ```
 
 `.pointer("/a/b/c")` is equivalent to `response["a"]["b"]["c"]` but returns `Option<&Value>` rather than panicking on a missing key.
@@ -323,20 +332,20 @@ let bytes = client
 
 **Offloading CPU-bound work from async**
 
-Async executors are for I/O — blocking them with CPU-heavy work (image decoding/encoding) starves other tasks. Use `spawn_blocking` to run it on a dedicated thread pool:
+Async executors are for I/O — blocking them with CPU-heavy work (image decoding/resizing) starves other tasks. Use `spawn_blocking` to run it on a dedicated thread pool. `apply_cover_internal` (in `cover.rs`) downloads the Anilist master on the async side, then decodes and resizes the thumbnail on a blocking thread:
 
 ```rust
-let img_bytes_vec = bytes.to_vec();         // clone data before move
-let dest_clone = dest.clone();              // clone path before move
+let img_bytes_vec = img_bytes.to_vec(); // clone data before move
 
-tauri::async_runtime::spawn_blocking(move || {
-    encode_cover(&img_bytes_vec, &dest_clone)
+let thumb_bytes = tauri::async_runtime::spawn_blocking(move || {
+    let img = image::load_from_memory(&img_bytes_vec).map_err(|e| e.to_string())?;
+    resize_to_jpeg(img, 200)
 })
 .await
-.map_err(|e| format!("Encoding task failed: {e}"))??; // outer ? = JoinError, inner ? = encode error
+.map_err(|e| e.to_string())??; // outer ? = JoinError, inner ? = the closure's own Result
 ```
 
-The double `??` unwraps two layers: `spawn_blocking` returns `Result<Result<(), String>, JoinError>`, so we propagate both.
+The double `??` unwraps two layers: `spawn_blocking` returns `Result<Result<Vec<u8>, String>, JoinError>`, so we propagate both — `.map_err` handles the outer `JoinError`, then the trailing `?` unwraps the inner `Result` from the closure itself.
 
 **Accessing the DB after async work**
 
@@ -423,6 +432,41 @@ if normalized_parent == normalized_root {
 
 This is why the recursive watch is safe to use broadly: events three or more levels deep (an image file, a `.tmp` file mid-download, etc.) simply don't match either parent-dir check and are dropped without doing anything.
 
+**Fire-and-forget background tasks, bounded by a `Semaphore`**
+
+The automatic Anilist cover lookup (`cover.rs::spawn_auto_cover_lookup`) is a good example of work that must *not* block the caller: `insert_new_projects` can discover hundreds of manga folders in one call (a first-time library import), and doing a network round-trip per project inline would make that call as slow as "project count × network latency". The fix is to spawn a detached task per project and never `.await` it from the caller:
+
+```rust
+pub fn spawn_auto_cover_lookup(app_handle: &tauri::AppHandle, project_id: String, project_name: String) {
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let semaphore = app_handle.state::<CoverLookupSemaphore>().0.clone();
+        let Ok(_permit) = semaphore.acquire().await else { return };
+        // ... do the lookup, update the DB, emit an event when done
+    });
+}
+```
+
+`tauri::async_runtime::spawn` (unlike `spawn_blocking`, used elsewhere for CPU-bound work) schedules an `async` future onto Tauri's Tokio runtime and returns immediately — the caller (a sync `#[tauri::command]` or the `notify` watcher closure) never awaits the returned handle, so it can't be slowed down by however long the task takes.
+
+Spawning one task per project unconditionally would still be unfriendly to a third-party API on a large import (hundreds of simultaneous requests). `tokio::sync::Semaphore` bounds that: it's constructed once with a fixed number of permits (`Semaphore::new(4)`, managed as Tauri state in `lib.rs`) and shared — via `Arc` — by every task that might run concurrently, whether spawned one-at-a-time (automatic lookup) or all-at-once in a loop (`auto_fill_missing_covers`'s bulk backfill). `.acquire().await` suspends until a permit is free; the returned `SemaphorePermit` releases it automatically when dropped (at the end of the task), so at most 4 lookups ever run at once regardless of how many tasks are queued up behind them.
+
+**Waiting for a batch of spawned tasks to finish**
+
+`auto_fill_missing_covers` needs to know when *all* of a whole batch of lookups have finished (to send a final summary), unlike the fire-and-forget automatic path. `tauri::async_runtime::spawn` returns a `JoinHandle<T>` that can be awaited for exactly this: collect the handles first (so every task starts queuing for a semaphore permit immediately), *then* await them one at a time:
+
+```rust
+let mut handles = Vec::new();
+for target in targets {
+    handles.push(tauri::async_runtime::spawn(async move { /* ... */ }));
+}
+for handle in handles {
+    let result = handle.await.unwrap_or(false); // JoinHandle<bool> -> Result<bool, JoinError>
+}
+```
+
+Awaiting in a second loop (rather than awaiting each `spawn` call immediately) is what lets them run concurrently — awaiting inside the first loop would serialise them, defeating the semaphore's whole purpose of letting up to 4 run at once.
+
 **Getting state into the handler closure**
 
 The handler closure isn't a `#[tauri::command]`, so Tauri can't inject `AppHandle` or `State` into it the normal way. Instead, clone what you need from the surrounding function *before* the closure and `move` the clone in:
@@ -479,6 +523,7 @@ fn table_exists(conn: &Connection, table: &str) -> bool {
 `initialize()` runs on every launch, so `CREATE TABLE IF NOT EXISTS` handles brand-new databases for free. These guards exist for the two migration shapes `IF NOT EXISTS` can't express:
 
 - **Adding a column to an existing table** (`cover_path`, `anilist_id`, `cover_title`): guarded with `column_exists`, then `ALTER TABLE ... ADD COLUMN` runs only if it's missing.
+- **Renaming an existing column** (`anilist_id` → `mangaupdates_id` and, one migration later, back again): guarded with *two* `column_exists` checks — the old name must still be there, and the new name must not be yet — then `ALTER TABLE ... RENAME COLUMN` runs, immediately followed by an `UPDATE` that nulls out the renamed column's old values (a numeric ID from one provider means nothing in the other's ID space, so keeping it around would be actively misleading rather than merely stale). The migration reverting back added one more wrinkle: it targets the cleanup `UPDATE` at only the rows affected by the *previous* migration (`WHERE mangaupdates_id IS NOT NULL`, referencing the old column name, before the rename statement that follows it in the same `execute_batch`) rather than every row — a manually-uploaded cover has no provider ID to begin with, so it must survive a migration that's specifically undoing a provider switch.
 - **A breaking schema change with no in-place migration path**: when the single-library-root rearchitecture landed, old databases' `projects` rows each pointed at an independent, manually-picked folder — a shape the new "one root, auto-scanned" model can't reconcile. Rather than write a data migration, `table_exists(conn, "settings")` detects "this is an old-schema DB" (the `settings` table is new) and drops `excluded_images`/`chapters`/`projects` outright before the normal `CREATE TABLE IF NOT EXISTS` block repopulates them — the next scan of whatever library root the user configures rebuilds everything from disk.
 
 ---
