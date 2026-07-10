@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/toaster'
 import { useKoboDevice } from '@/hooks/use-kobo-device'
 import { api } from '@/lib/tauri'
 import type { BackfillEvent, Project } from '@/types'
-import { KoboDeviceBadge } from './components/kobo-device-badge'
+import { KoboSyncDrawer } from './components/kobo-sync-drawer'
 import { ProjectRow } from './components/project-row'
 
 interface ProjectListProps {
@@ -202,7 +202,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         {libraryRoot && (
           <div className="flex items-center gap-1">
             {koboDevice && (
-              <KoboDeviceBadge
+              <KoboSyncDrawer
                 device={koboDevice}
                 projects={projects}
                 onProjectSynced={handleProjectSynced}
