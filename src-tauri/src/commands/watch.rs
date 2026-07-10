@@ -5,8 +5,8 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::projects::{
-    insert_new_chapters, insert_new_projects, query_all_projects, remove_missing_chapters,
-    remove_missing_projects,
+    insert_new_chapters, insert_new_projects, query_all_projects, recompute_sort_order,
+    remove_missing_chapters, remove_missing_projects,
 };
 use crate::commands::settings::read_library_root;
 use crate::db::DbState;
@@ -110,6 +110,7 @@ pub fn start_library_watcher(app: &AppHandle) -> Result<(), String> {
                     insert_new_chapters(&conn, project_id, project_root).unwrap_or(false);
                 let removed = remove_missing_chapters(&conn, project_id).unwrap_or(false);
                 if inserted || removed {
+                    let _ = recompute_sort_order(&conn, project_id);
                     let _ = app_for_handler.emit("chapters-updated", project_id);
                 }
             }

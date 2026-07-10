@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::commands::settings::read_library_root;
 use crate::db::DbState;
-use crate::utils::{is_image_file, normalize_path};
+use crate::utils::{extract_chapter_number, is_image_file, natural_sort_key, normalize_path};
 
 // These structs are returned from commands. `Serialize` lets serde convert them to JSON
 // so Tauri can send them to the frontend. `rename_all = "camelCase"` means `root_path`
@@ -33,6 +33,9 @@ pub struct Chapter {
     pub project_id: String,
     pub folder_path: String,
     pub display_name: String,
+    // Derived from display_name at read time (not stored) — see extract_chapter_number.
+    // None means the folder name has no number to show as a "Chapter N" label.
+    pub chapter_number: Option<f64>,
     pub sort_order: i64,
     pub image_count: i64,
     pub excluded_count: i64,
@@ -271,7 +274,9 @@ pub(crate) fn insert_new_projects(
         )
         .map_err(|e| e.to_string())?;
 
-        insert_new_chapters(conn, &project_id, &root_path)?;
+        if insert_new_chapters(conn, &project_id, &root_path)? {
+            recompute_sort_order(conn, &project_id)?;
+        }
         inserted.push((project_id, name));
     }
 
@@ -445,6 +450,49 @@ pub(crate) fn remove_missing_chapters(
     Ok(removed_any)
 }
 
+// Re-derives every chapter's sort_order from its folder name, so the list always reads
+// in natural-sort order (Chapter 2 before Chapter 10) with no manual drag-to-reorder
+// involved. SQLite has no natural-sort collation, so this sorts in Rust and writes the
+// resulting rank back to sort_order — called after insert_new_chapters/remove_missing_chapters
+// actually change the chapter set, by both `get_project_chapters` and the watcher in
+// `watch.rs`, so the two never drift out of sync with disk.
+pub(crate) fn recompute_sort_order(conn: &rusqlite::Connection, project_id: &str) -> Result<(), String> {
+    let mut chapters: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, folder_path FROM chapters WHERE project_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String)> = stmt
+            .query_map(params![project_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    // Sort by the folder's base name (the part after the last '/'), not the full path —
+    // every chapter in a project shares the same parent prefix, but comparing basenames
+    // directly is clearer about intent than relying on that being true.
+    chapters.sort_by_key(|(_, folder_path)| {
+        let basename = Path::new(folder_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| folder_path.clone());
+        natural_sort_key(&basename)
+    });
+
+    for (i, (id, _)) in chapters.iter().enumerate() {
+        conn.execute(
+            "UPDATE chapters SET sort_order = ?1 WHERE id = ?2",
+            params![i as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 // Returns all chapters for a project, ordered by sort_order.
 // Also rescans the project's root folder: new subdirectories are inserted as chapters,
 // and chapters whose folder was deleted on disk are removed from the DB.
@@ -464,8 +512,11 @@ pub fn get_project_chapters(
         )
         .map_err(|e| e.to_string())?;
 
-    insert_new_chapters(&conn, &project_id, &root_path)?;
-    remove_missing_chapters(&conn, &project_id)?;
+    let inserted = insert_new_chapters(&conn, &project_id, &root_path)?;
+    let removed = remove_missing_chapters(&conn, &project_id)?;
+    if inserted || removed {
+        recompute_sort_order(&conn, &project_id)?;
+    }
 
     // Query all chapters (including any just inserted) in sort order.
     // The subquery counts excluded images inline so the frontend gets the badge count
@@ -483,11 +534,14 @@ pub fn get_project_chapters(
 
     let chapters = stmt
         .query_map(params![project_id], |row| {
+            let display_name: String = row.get(3)?;
+            let chapter_number = extract_chapter_number(&display_name);
             Ok(Chapter {
                 id: row.get(0)?,
                 project_id: row.get(1)?,
                 folder_path: row.get(2)?,
-                display_name: row.get(3)?,
+                display_name,
+                chapter_number,
                 sort_order: row.get(4)?,
                 image_count: row.get(5)?,
                 excluded_count: row.get(6)?,
