@@ -120,6 +120,30 @@ pub fn initialize(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "projects", "cover_thumbnail_path") {
         conn.execute_batch("ALTER TABLE projects ADD COLUMN cover_thumbnail_path TEXT;")?;
     }
+    // v6: replaced Anilist with MangaUpdates as the cover-lookup source. Renaming the
+    // column preserves the rest of the schema; the old numeric Anilist IDs are meaningless
+    // in MangaUpdates' ID space, so any existing values are cleared right after the rename
+    // (the cover files themselves are left alone — only the provider metadata is stale).
+    if column_exists(conn, "projects", "anilist_id") && !column_exists(conn, "projects", "mangaupdates_id") {
+        conn.execute_batch(
+            "ALTER TABLE projects RENAME COLUMN anilist_id TO mangaupdates_id;
+             UPDATE projects SET mangaupdates_id = NULL;",
+        )?;
+    }
+    // v7: reverted back to Anilist — MangaUpdates' search results turned out to serve very
+    // low-resolution cover images. Any cover actually fetched through the (now-removed)
+    // MangaUpdates lookup is cleared out entirely, not just its ID, so the next automatic
+    // or bulk lookup redownloads a proper Anilist cover instead of leaving the low-quality
+    // file in place; covers with no mangaupdates_id (manual uploads) are left untouched.
+    // The column itself is renamed back, mirroring v6 in reverse.
+    if column_exists(conn, "projects", "mangaupdates_id") && !column_exists(conn, "projects", "anilist_id") {
+        conn.execute_batch(
+            "UPDATE projects SET cover_path = NULL, cover_thumbnail_path = NULL, cover_title = NULL
+                 WHERE mangaupdates_id IS NOT NULL;
+             ALTER TABLE projects RENAME COLUMN mangaupdates_id TO anilist_id;
+             UPDATE projects SET anilist_id = NULL;",
+        )?;
+    }
 
     Ok(())
 }
