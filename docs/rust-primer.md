@@ -256,6 +256,26 @@ pub path: String,              // field readable outside the module
 
 ---
 
+## `regex` — pulling structured pieces out of messy folder names
+
+```rust
+let keyword = Regex::new(r"(?i)\bc(?:h(?:apter)?)?\.?\s*(\d+(?:\.\d+)?)\b").expect("valid regex");
+if let Some(caps) = keyword.captures(name) {
+    return caps.get(1)?.as_str().parse().ok();
+}
+```
+
+`Regex::new` compiles a pattern at the point it's used — `expect("valid regex")` is safe here because the pattern is a hardcoded string literal, not user input, so a syntax error would only ever come from a typo caught the moment the code runs. Two call shapes come up repeatedly in this codebase:
+
+- **`.replace_all(haystack, replacement)`** (`clean_title` in `cover.rs`): strips matched text out, e.g. deleting `[Group]` bracket tags and `v01-05`/`ch1-10` range tokens before sending a folder name to Anilist's search.
+- **`.captures(haystack)`** (`extract_chapter_number` in `utils.rs`): pulls a piece *out* of the match rather than discarding it. `(\d+(?:\.\d+)?)` is a capture group (parentheses) — `caps.get(1)` retrieves what group 1 matched (group 0 would be the whole match, including the "Ch." prefix this pattern is specifically trying to exclude from the returned number). `(?:...)` — a group with `?:` — is *non-capturing*: it's there purely to scope `?`/alternation without producing an extra numbered group to track.
+
+`(?i)` at the start of a pattern makes the whole match case-insensitive inline, rather than needing a separate builder call. `\b` is a word boundary (matches between a word character and a non-word character, or string edge) — it's what stops `\bc` from matching the "c" inside "Comic" (no boundary between 'c' and 'o', both word characters) while still matching "Ch.033" (boundary before "C").
+
+Both `extract_chapter_number`'s patterns and `clean_title`'s only run against folder names already on the user's own disk, not network input, so there's no untrusted-input/ReDoS concern to design around here.
+
+---
+
 ## `reqwest` — async HTTP inside a Tauri command
 
 Tauri runs on a Tokio async runtime. `reqwest::blocking` tries to spin up its own runtime internally, which panics when nested inside an existing one. The fix is to make the command `async` and use `reqwest::Client` (the async client) with `.await`.
@@ -525,6 +545,7 @@ fn table_exists(conn: &Connection, table: &str) -> bool {
 - **Adding a column to an existing table** (`cover_path`, `anilist_id`, `cover_title`): guarded with `column_exists`, then `ALTER TABLE ... ADD COLUMN` runs only if it's missing.
 - **Renaming an existing column** (`anilist_id` → `mangaupdates_id` and, one migration later, back again): guarded with *two* `column_exists` checks — the old name must still be there, and the new name must not be yet — then `ALTER TABLE ... RENAME COLUMN` runs, immediately followed by an `UPDATE` that nulls out the renamed column's old values (a numeric ID from one provider means nothing in the other's ID space, so keeping it around would be actively misleading rather than merely stale). The migration reverting back added one more wrinkle: it targets the cleanup `UPDATE` at only the rows affected by the *previous* migration (`WHERE mangaupdates_id IS NOT NULL`, referencing the old column name, before the rename statement that follows it in the same `execute_batch`) rather than every row — a manually-uploaded cover has no provider ID to begin with, so it must survive a migration that's specifically undoing a provider switch.
 - **A breaking schema change with no in-place migration path**: when the single-library-root rearchitecture landed, old databases' `projects` rows each pointed at an independent, manually-picked folder — a shape the new "one root, auto-scanned" model can't reconcile. Rather than write a data migration, `table_exists(conn, "settings")` detects "this is an old-schema DB" (the `settings` table is new) and drops `excluded_images`/`chapters`/`projects` outright before the normal `CREATE TABLE IF NOT EXISTS` block repopulates them — the next scan of whatever library root the user configures rebuilds everything from disk.
+- **A data-only resync with no schema change to guard**: `resync_chapter_display_names` (added when chapter renaming was removed in favor of an auto-sorted, read-only folder-name label) doesn't add, rename, or drop anything — it just recomputes `display_name` from `folder_path` for every row. There's no column shape to check with `column_exists`, so instead of a guard it relies on the operation being naturally idempotent: recomputing the same basename twice is a no-op (the `if basename != display_name` check even skips the `UPDATE` entirely on the second run), so it's safe to run unconditionally on every launch rather than gating it behind a one-time flag.
 
 ---
 
