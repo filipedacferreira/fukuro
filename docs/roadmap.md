@@ -49,27 +49,6 @@ When a project's `root_path` or a chapter's `folder_path` no longer exists on di
 - Chapters whose subfolder was deleted (not renamed) — already handled outside this feature: the folder watcher (see removed "Watch folder" item) and `get_project_chapters` both remove chapters whose `folder_path` no longer exists automatically, no confirmation prompt
 - Real-time watching of the *root* path itself disappearing (covered by the "detect on load" approach above, not by the watcher, since a missing root can't be watched)
 
-### Export history
-
-Track when each project was last exported and to which path, so re-exporting doesn't require going through the file picker again. Unlocks **Batch export** (relies on these columns), **Chapter exclusion** (nulls `last_exported_at` on toggle), and **Kobo sync** (compares `last_exported_at` against `last_synced_at`).
-
-**DB changes**
-
-- Add `last_export_path TEXT` and `last_exported_at TEXT` (ISO timestamp, nullable) to `projects`
-
-**UI**
-
-- Show "Last exported: X days ago" in the project list
-- **Re-export** button in the export panel that skips the file picker and overwrites `last_export_path` directly (file existence is guaranteed at this point by load-time validation — confirmation asks "overwrite existing file?" not "does it exist?")
-
-**File existence validation**
-
-The app has no file watcher on `last_export_path` — if the user deletes the exported `.cbz` externally (while the app is open or closed), the DB still holds the stale path. To handle this gracefully:
-
-- When the project list loads, check whether `last_export_path` exists on disk via a cheap `fs::metadata` call for each project that has one
-- If the file is gone, treat the project as never exported: grey out or hide the "Last exported" indicator and clear `last_export_path` / `last_exported_at` in the DB
-- This same validation must run before Kobo sync attempts a copy — a missing local file should fall back to prompting for a new path rather than erroring silently
-
 ### Pre-export summary
 
 Before committing to an export, show a summary of what will be included so the user can catch mistakes. Ships before **Chapter exclusion**, so that feature's summary integration (counting excluded chapters) extends an existing screen rather than waiting on one.
@@ -143,7 +122,7 @@ Depends on at least one **Now** item; ordered below so each entry's prerequisite
 
 ### Chapter exclusion
 
-Let users exclude entire chapters from the CBZ export without deleting them, mirroring the per-image exclusion already in place. Depends on **Export history**'s `last_exported_at` column.
+Let users exclude entire chapters from the CBZ export without deleting them, mirroring the per-image exclusion already in place. Builds on the `last_exported_at` column, already in place on `projects` (added for Kobo sync, now shipped).
 
 - Add an `is_excluded` column (boolean, default `false`) to the `chapters` table
 - Toggle via a button in the chapter row — uses a distinct chapter-level icon (e.g. folder-slash) rather than the same icon as image exclusion, to clearly signal different scope
@@ -204,72 +183,13 @@ Let users define a naming template for the exported file instead of always using
 
 ### Batch export
 
-Export multiple projects to a target folder in one operation, without going through the file picker for each one. Depends on **Export history** (`last_export_path`/`last_exported_at`); resolves **Output filename templates** per project when one is set.
+Export multiple projects to a target folder in one operation, without going through the file picker for each one. Builds on the `last_export_path`/`last_exported_at` columns, already in place on `projects` (added for Kobo sync, now shipped); resolves **Output filename templates** per project when one is set.
 
 - Add a multi-select mode to the project list (checkbox per row, "Select all" toggle)
 - A "Export selected" action opens a single folder picker; each project is exported as `{project_name}.cbz` into that folder (resolving the output filename template per project if one is set)
 - Progress is shown inline per project (idle → exporting → done / failed)
 - Each project's `last_export_path` and `last_exported_at` are updated immediately on its individual success, regardless of whether other projects in the batch fail
 - Projects that fail mid-batch surface an error without aborting the rest
-
-### Kobo sync
-
-Send exported `.cbz` files directly to a Kobo device connected via USB and keep them up to date as projects grow. Depends on **Export history** (`last_exported_at`/`last_synced_at` comparison) and resolves **Output filename templates** for the destination filename when one is set.
-
-**Device detection (Windows-first)**
-
-On Windows, enumerate all drive letters (`A:\` – `Z:\`) and check each root for the `.kobo/` marker directory — the reliable cross-model signal that the drive is a Kobo. macOS detection scans `/Volumes/` for the same marker. Detection runs on a short poll interval (e.g. every 3 s) so the UI reacts without requiring an app restart.
-
-**Global device indicator**
-
-- A small badge in the app header (similar to the Developer Mode DEV badge) appears when a Kobo is detected — e.g. a device icon with the drive label
-- The badge disappears immediately when the device is unplugged
-- Clicking the badge opens a Kobo panel / popover showing device name, free space, and a **Sync all** button
-
-**Per-project status markers (project list)**
-
-Each project row gets a Kobo status icon that reflects the sync state:
-
-| State | Marker |
-|---|---|
-| Not on device | no icon |
-| On device, up to date | green device / checkmark icon |
-| On device, outdated | amber warning icon (new chapters added since last sync) |
-| Syncing | spinner |
-
-"Outdated" is determined by comparing `last_exported_at` against `last_synced_at` — both tracked as nullable ISO timestamps on `projects`. See the sync section below for details.
-
-**Two export scenarios — export and sync are separate concerns**
-
-The core **Export CBZ** button always stays and is available regardless of whether a Kobo is connected. Sync is a follow-up step, not a replacement:
-
-1. **Export** — runs `create_cbz`, saves the `.cbz` to a user-picked local path, updates `last_export_path` and `last_exported_at` on the project (owned by the export history feature)
-2. **Sync to Kobo** — ensures the device copy is current; the local `.cbz` is always written first, then copied to the device. The sync button resolves the export step as follows:
-   - If `last_export_path` exists on disk: skip re-export, copy the existing file directly to the device
-   - If `last_export_path` is set but the file is gone (stale path): re-export silently to the same path, then copy
-   - If no prior export path exists: prompt the user for a save location, export, then copy
-   - The user never needs to manually export before syncing; the two-step flow is an implementation detail
-
-The `.cbz` always lives locally first — the device receives a copy. These two timestamps serve different purposes and must not be conflated:
-
-| Column | Set by | Meaning |
-|---|---|---|
-| `last_exported_at` | Export | When the local file was last written |
-| `last_synced_at` | Kobo sync | When the device copy was last updated |
-
-A project is considered outdated on the device when `last_exported_at > last_synced_at`. Null values are handled as follows: if `last_synced_at` is null and `last_exported_at` is set, treat as outdated; if both are null, treat as "not on device" (no icon shown).
-
-**Sync actions**
-
-- **Per-project sync button** — appears in the project row (or its hover state) when a Kobo is connected; copies the local `.cbz` to the device (running export first if needed); updates `last_synced_at` on success
-- **Sync all** — in the Kobo panel header; at the start of the run, scans `{kobo_root}\Digital Reads\` to build a set of existing filenames, then iterates all projects where `last_exported_at > last_synced_at` (applying null rules above) or whose expected `{project_name}.cbz` is absent from that set; runs in sequence with per-project progress inline (same pattern as batch export)
-- Destination filename resolves the output filename template if one is set, falling back to `{project_name}.cbz` — local and device filenames must always match so the Sync all file existence check stays reliable
-- Destination path is `{kobo_root}\Digital Reads\{resolved_name}.cbz` (`PathBuf::join` on the Rust side — never string-concatenate; note: verify that `Digital Reads` is the correct sideload path across Kobo firmware versions before implementation)
-- Errors (device disconnected mid-sync, insufficient space) surface per-project without aborting the rest of the queue
-
-**UI copy**
-
-Use device-neutral language throughout: **Send to device**, **Sync**, **Up to date**, **Outdated** — never Finder/Explorer-specific terms.
 
 ---
 
