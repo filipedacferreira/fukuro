@@ -413,7 +413,7 @@ fn emit_projects_updated(app_handle: &tauri::AppHandle) {
 }
 
 #[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum BackfillEvent {
     // One project's lookup resolved (matched or skipped) — `current` counts attempts so
     // far, `applied` distinguishes a successful match from a skip in the progress UI.

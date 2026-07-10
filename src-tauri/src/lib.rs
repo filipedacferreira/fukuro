@@ -57,6 +57,13 @@ pub fn run() {
             commands::watch::start_library_watcher(&app.handle())
                 .expect("could not start library watcher");
 
+            // Holds the most recently detected Kobo device (or None), kept current by the
+            // background poller started below. Starts empty — the poller's first tick fills
+            // it in within 3s, and `get_kobo_device` reads whatever's here right away so the
+            // frontend badge doesn't have to wait for that first tick on every launch.
+            app.manage(commands::kobo::KoboDeviceState(Mutex::new(None)));
+            commands::kobo::start_kobo_watcher(&app.handle());
+
             // Build the native OS menu bar.
             let menu = MenuBuilder::new(app)
                 .item(
@@ -133,6 +140,9 @@ pub fn run() {
             commands::cover::apply_anilist_cover,
             commands::cover::auto_fill_missing_covers,
             commands::cover::remove_project_cover,
+            commands::kobo::get_kobo_device,
+            commands::kobo::sync_project_to_kobo,
+            commands::kobo::sync_all_to_kobo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

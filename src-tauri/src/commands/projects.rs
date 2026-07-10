@@ -24,6 +24,17 @@ pub struct Project {
     pub cover_thumbnail_path: Option<String>,
     pub anilist_id: Option<i64>,
     pub cover_title: Option<String>,
+    // Where/when the user's own "Export CBZ" file was last written (Export history) — set by
+    // `create_cbz`, cleared together by `list_projects` if that file is deleted externally
+    // (see `clear_stale_export_paths` below).
+    pub last_export_path: Option<String>,
+    pub last_exported_at: Option<i64>,
+    // Kobo sync's own state: when its independent AppData cache was last (re)written, and
+    // when that cache was last copied onto a device. Both are entirely separate from the two
+    // fields above — see kobo.rs's `kobo_cache_path` for why sync keeps its own copy instead
+    // of reusing the user's exported file.
+    pub last_kobo_export_at: Option<i64>,
+    pub last_synced_at: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -63,7 +74,8 @@ pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, Stri
     let mut stmt = conn
         .prepare(
             "SELECT p.id, p.root_path, p.name, p.created_at, COUNT(c.id) as chapter_count,
-                    p.cover_path, p.anilist_id, p.cover_title, p.cover_thumbnail_path
+                    p.cover_path, p.anilist_id, p.cover_title, p.cover_thumbnail_path,
+                    p.last_export_path, p.last_exported_at, p.last_kobo_export_at, p.last_synced_at
              FROM projects p
              LEFT JOIN chapters c ON c.project_id = p.id
              GROUP BY p.id
@@ -87,6 +99,10 @@ pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, Stri
                 anilist_id: row.get(6)?,
                 cover_title: row.get(7)?,
                 cover_thumbnail_path: row.get(8)?,
+                last_export_path: row.get(9)?,
+                last_exported_at: row.get(10)?,
+                last_kobo_export_at: row.get(11)?,
+                last_synced_at: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -94,6 +110,40 @@ pub(crate) fn query_all_projects(conn: &Connection) -> Result<Vec<Project>, Stri
         .collect();
 
     Ok(projects)
+}
+
+// Clears `last_export_path`/`last_exported_at` for any project whose manually-exported file
+// has been deleted externally (while the app was open or closed) — otherwise the DB would
+// keep pointing the "Last exported" display at a file that no longer exists. Called at the
+// top of `list_projects` so this is checked fresh every time the list loads, mirroring how
+// `remove_missing_projects`/`remove_missing_chapters` reconcile disk state one level down.
+// Doesn't touch `last_kobo_export_at`/`last_synced_at` — Kobo sync's own AppData cache file
+// isn't user-facing, so `sync_project` (kobo.rs) already handles a missing cache file itself
+// by just regenerating it, the same way chapter thumbnails regenerate on demand.
+fn clear_stale_export_paths(conn: &Connection) -> Result<(), String> {
+    let paths: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, last_export_path FROM projects WHERE last_export_path IS NOT NULL")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    for (project_id, last_export_path) in paths {
+        if !Path::new(&last_export_path).is_file() {
+            conn.execute(
+                "UPDATE projects SET last_export_path = NULL, last_exported_at = NULL WHERE id = ?1",
+                params![project_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
 }
 
 // Returns all projects, rescanning the configured library root first so the list always
@@ -113,6 +163,7 @@ pub fn list_projects(
 
     let new_projects = insert_new_projects(&conn, &library_root)?;
     remove_missing_projects(&conn, &app_handle)?;
+    clear_stale_export_paths(&conn)?;
 
     let projects = query_all_projects(&conn)?;
     drop(conn); // release the lock before spawning lookups, which will re-acquire it later
@@ -181,11 +232,11 @@ pub fn rename_project(
     Ok(())
 }
 
-// Deletes a project's cached cover image and per-chapter thumbnail cache directories.
-// Called before a project's DB row is removed — whether by an explicit `delete_project`,
-// by `remove_missing_projects` noticing its folder vanished, or by `set_library_root`
-// wiping out projects that belonged to the previous root — so AppData doesn't accumulate
-// files for projects that no longer exist in the DB.
+// Deletes a project's cached cover image, per-chapter thumbnail cache directories, and Kobo
+// sync cache file. Called before a project's DB row is removed — whether by an explicit
+// `delete_project`, by `remove_missing_projects` noticing its folder vanished, or by
+// `set_library_root` wiping out projects that belonged to the previous root — so AppData
+// doesn't accumulate files for projects that no longer exist in the DB.
 pub(crate) fn cleanup_project_assets(
     conn: &Connection,
     app_handle: &AppHandle,
@@ -198,6 +249,11 @@ pub(crate) fn cleanup_project_assets(
     }
     if let Some(cover_thumbnail_path) = cover_thumbnail_path {
         let _ = std::fs::remove_file(cover_thumbnail_path); // ignore error if already gone
+    }
+
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        let kobo_cache = data_dir.join("kobo-exports").join(format!("{project_id}.cbz"));
+        let _ = std::fs::remove_file(kobo_cache); // ignore error if already gone
     }
 
     let chapter_ids: Vec<String> = {

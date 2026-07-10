@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -6,6 +6,24 @@ use tauri::Manager;
 
 use crate::db::DbState;
 use crate::utils::{is_image_file, natural_sort_key, normalize_path};
+
+// Marks the chapter's project as having stale exports — called whenever a page is
+// excluded/included or permanently deleted, since either changes what `create_cbz`/Kobo sync
+// would actually produce. Nulls both cached-export timestamps: `last_exported_at` (the
+// user's own manual "Export CBZ" file) and `last_kobo_export_at` (Kobo sync's independent
+// AppData cache — see kobo.rs) — the two are separate files now, but content changing
+// invalidates both equally. This is what makes the project-row status marker show
+// "outdated" and, more importantly, what makes `sync_project` (kobo.rs) re-export before
+// copying instead of re-uploading a now-stale cached file.
+fn invalidate_export(conn: &Connection, chapter_id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE projects SET last_exported_at = NULL, last_kobo_export_at = NULL
+         WHERE id = (SELECT project_id FROM chapters WHERE id = ?1)",
+        params![chapter_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 // Returned by get_chapter_images for each image file found in a chapter folder.
 // Both `path` and `thumbnail_path` are absolute filesystem paths.
@@ -142,6 +160,7 @@ pub fn toggle_exclusion(
             params![chapter_id, image_path],
         )
         .map_err(|e| e.to_string())?;
+        invalidate_export(&conn, &chapter_id)?;
         Ok(false) // new state: included
     } else {
         // Not excluded → insert a row.
@@ -150,6 +169,7 @@ pub fn toggle_exclusion(
             params![chapter_id, image_path],
         )
         .map_err(|e| e.to_string())?;
+        invalidate_export(&conn, &chapter_id)?;
         Ok(true) // new state: excluded
     }
 }
@@ -193,6 +213,7 @@ pub fn hard_delete_image(
         params![chapter_id, path],
     )
     .map_err(|e| e.to_string())?;
+    invalidate_export(&conn, &chapter_id)?;
 
     Ok(())
 }

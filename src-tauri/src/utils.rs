@@ -7,6 +7,18 @@ pub fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+// Current time as Unix epoch seconds. Used for `created_at` and, more recently,
+// `last_exported_at`/`last_synced_at` (see db.rs's v9 migration) — plain epoch integers
+// rather than an ISO-8601 string, since nothing in this codebase otherwise needs a
+// date/time crate and the client-side "outdated" comparison / "X days ago" display just
+// want two numbers to subtract.
+pub fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
 // Returns true for file extensions the image crate can decode.
 // Shared across images.rs, thumbnails.rs, projects.rs, and export.rs.
 pub fn is_image_file(path: &Path) -> bool {
