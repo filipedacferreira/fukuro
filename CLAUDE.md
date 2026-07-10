@@ -33,7 +33,7 @@ src/
   lib/
     tauri.ts                      # Typed invoke() wrappers for all Rust commands
     validation.ts                 # Shared zod schemas (renameSchema / RenameValues)
-    kobo.ts                       # getKoboSyncStatus, formatBytes, formatRelativeTime
+    kobo.ts                       # getKoboSyncStatus, isKoboPending, formatBytes, formatRelativeTime
     utils/classnames.ts           # CVA + tailwind-merge setup (cn, cva)
   hooks/
     use-kobo-device.ts             # Tracks the connected Kobo device: get_kobo_device seed + kobo-device-changed listener
@@ -45,7 +45,8 @@ src/
       project-list.tsx            # Home screen: library-root onboarding, live project list, ChangeLibraryDialog
       components/
         project-row.tsx            # Project card + ProjectRenameDialog + ProjectDeleteDialog; "Send to device" lives in its dropdown menu
-        kobo-device-badge.tsx      # Header badge: up-to-date/outdated indicator + popover with device info and Sync all
+        kobo-sync-drawer.tsx       # Header pill (device + pending count) opening a Drawer: per-project sync status/progress list + Sync all
+        kobo-sync-row.tsx          # One project's row inside the drawer: status pill, last-synced subline, per-row send/retry (own useKoboSync)
     editor/                       # Editor view
       editor.tsx                  # Main workspace: chapter list + export panel
       components/
@@ -57,7 +58,7 @@ src/
         export-panel.tsx          # Save dialog + Export CBZ button + Send to device button
   components/
     ui/                           # Significa Foundations UI (copied, not installed)
-      slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx menu.tsx popover.tsx
+      slot.tsx button.tsx dialog.tsx disclosure.tsx divider.tsx drawer.tsx menu.tsx popover.tsx
       field.tsx input.tsx modal.tsx progress.tsx skeleton.tsx spinner.tsx toaster.tsx tooltip.tsx
     cover-dialog.tsx              # Shared cover dialog; accepts projectId + cover: CoverInfo + onCoverChange: (CoverInfo) => void
     cover-thumbnail.tsx           # Shared cover button (sm/lg sizes); used in editor header + project cards
@@ -129,7 +130,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `remove_project_cover(projectId)` | Delete cover + thumbnail files and clear `cover_path`/`cover_thumbnail_path`/`anilist_id`/`cover_title` in DB |
 | `get_kobo_device()` | Returns the currently-known Kobo device (`{ drivePath, label, freeBytes, totalBytes }`) or `null`, read synchronously from the state the background poller keeps current — see **Kobo sync** below |
 | `sync_project_to_kobo(projectId, onEvent)` | Ensures a fresh `.cbz` in Kobo sync's own AppData cache (re-exporting first if needed), then copies it onto the connected Kobo with byte-level progress; streams `exporting` / `copying` / `done` / `error` via Channel. Never prompts for a save location |
-| `sync_all_to_kobo(onEvent)` | Runs the same sync for every project that's outdated or missing on the device, in sequence; streams a `progress`/`done` summary via Channel (no byte-level detail per project) |
+| `sync_all_to_kobo(onEvent)` | Runs the same sync for every project that's outdated or missing on the device, in sequence; streams `started` (row now uploading) / `progress` (row finished) / `done` (summary) via Channel — coarse, no byte-level detail per project |
 
 `start_library_watcher` (in `watch.rs`) is not an invokable command — it's a plain function called from `lib.rs`'s `setup()` at launch (if a library root is already configured) and from `set_library_root` whenever the root changes. It watches the entire library root recursively for the whole app session (both the manga level and the chapter level — see `docs/rust-primer.md`'s `notify` entry for how one recursive watch is scoped back to those two levels), replacing any previously active watcher. On a relevant `Create`/`Remove` event it rescans the affected level and emits either `projects-updated` (payload: the fresh `Project[]`) or `chapters-updated` (payload: the affected project id) — no confirmation, since the filesystem change already happened.
 
@@ -186,9 +187,15 @@ Kobo sync never prompts for a save location, on either the per-project button or
 
 Synced files go to `{drive}\fukuro\{project_name}.cbz` on the device — a dedicated folder (created on first sync), not the device root or any existing sideload folder, so the "does this project already have a file on the device" scan in `sync_all_to_kobo` only ever has to look in one place. Kobo's Nickel software indexes `.cbz`/`.epub` files recursively regardless of folder structure, so no specific folder name is required by the device itself.
 
-**Outdated detection**
+**Status detection**
 
-A project reads as **outdated** (`getKoboSyncStatus` in `lib/kobo.ts`) whenever `lastKoboExportAt`/`lastSyncedAt` don't agree the device copy reflects the current cache — including the case where `lastKoboExportAt` is `null` because the cache was invalidated (see below) after a prior sync. Both null (never synced at all) shows no indicator. Note this compares against `lastKoboExportAt`, not `lastExportedAt` — the latter is Export history's own column and has no bearing on what's actually on the device.
+`getKoboSyncStatus` (`lib/kobo.ts`) derives one of three resting states from `lastKoboExportAt`/`lastSyncedAt` (never `lastExportedAt` — that's Export history's own column, unrelated to what's on the device):
+
+- **`not-sent`** — both timestamps null: never exported to the Kobo cache *and* never copied to a device. (This case previously returned `null`/no indicator, which hid never-sent projects from the pending count even though `sync_all_to_kobo` would send them — the awareness gap the drawer redesign fixed.)
+- **`outdated`** — on the device once but drifted since: exported-but-not-copied, or invalidated after an exclusion toggle / page delete (`lastKoboExportAt` null with a prior sync — see below).
+- **`up-to-date`** — the device copy reflects the current cache.
+
+`isKoboPending` = anything that isn't `up-to-date` (both `not-sent` and `outdated`); it drives the header pill's count and the drawer's "N pending" summary. It's an approximation — it can't see a device copy deleted directly on the Kobo (the backend's `existing_on_device` scan catches that), which is why the drawer's Sync action stays enabled even at zero pending.
 
 **Invalidating a stale cache**
 
@@ -200,9 +207,12 @@ Excluding/including a page (`toggle_exclusion`) or permanently deleting one (`ha
 
 **UI**
 
-- `KoboDeviceBadge` (project-list header, shown only when a device is connected): an up-to-date/outdated icon sits directly next to the trigger button, visible without opening anything; the popover itself shows device label/free space and a **Sync all** button
-- Per-project sync lives in `ProjectRow`'s `⋯` dropdown menu as a plain **Send to device** item (no separate status marker per row — the aggregate badge above is the single source of truth)
-- `ExportPanel` (editor) has its own **Send to device** button alongside **Export CBZ**, both driven by the shared `useKoboSync` hook
+- `KoboSyncDrawer` (project-list header, shown only when a device is connected) is the single place the whole sync picture lives. A labeled **pill trigger** shows the device + a pending count (warning tint) or an up-to-date check, visible without opening anything. Clicking it opens a right-hand Foundations **Drawer**:
+  - **Header:** device label + free/total space.
+  - **List:** *every* project (via `KoboSyncRow`), pending (Not sent / Outdated) sorted above Up to date, each with a status pill, a "Synced X ago" subline, and a per-row **Send**/**Retry** button (a single send shows byte-level progress via its own `useKoboSync`).
+  - **Actions (sticky footer):** an overall "Syncing X of N" bar during a run + a **Sync all** button, always enabled while a device is connected (reads "Re-sync all" at zero pending so the backend's device scan can catch externally-deleted files).
+  - During **Sync all**, rows go Queued → Syncing (spinner) → Done/Failed, driven by `SyncAllEvent`'s `started`/`progress` stream; failed rows keep a Retry after the run. The drawer refuses to close mid-run so the event channel isn't orphaned.
+- Per-project sync *also* lives in `ProjectRow`'s `⋯` dropdown menu as a plain **Send to device** item, and `ExportPanel` (editor) has its own **Send to device** button alongside **Export CBZ** — all three entry points (drawer row, row menu, export panel) drive the shared `useKoboSync` hook. Project rows carry no standalone status marker; the drawer is the source of truth.
 
 **A gotcha worth knowing:** `SyncEvent`/`SyncAllEvent`/`ExportEvent`/`BackfillEvent` all need **both** `rename_all = "camelCase"` (renames the `type` tag) **and** `rename_all_fields = "camelCase"` (renames the fields inside each variant) — one without the other silently ships snake_case field names with no error anywhere. See `docs/rust-primer.md`'s "Tagged enums" entry for the full story.
 
@@ -321,7 +331,7 @@ Foundations UI components, hooks, and utils are **not** installed as a package �
 - `curl https://foundations.significa.co/{path}/llms.txt` (path from the index, e.g. `ui/button`, `components/marquee`) — that page's full docs in plain text: description, dependencies (as further `llms.txt` links to follow if needed), and the complete current source code block.
 
 They live alongside all other app code with no special namespace:
-- UI components: `src/components/ui/{name}.tsx` (button, dialog, disclosure, divider, field, input, modal, progress, skeleton, spinner, toaster, tooltip, slot)
+- UI components: `src/components/ui/{name}.tsx` (button, dialog, disclosure, divider, drawer, field, input, modal, progress, skeleton, spinner, toaster, tooltip, slot)
 - Hooks: `src/hooks/{name}.ts` (use-element-transition, use-top-layer)
 - Utils: `src/utils/{name}.ts` (compose-refs, next-frame)
 
