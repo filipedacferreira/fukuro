@@ -1,5 +1,7 @@
 import { type Channel, invoke } from '@tauri-apps/api/core'
 import type {
+  AnilistCandidate,
+  BackfillEvent,
   Chapter,
   ExportEvent,
   ImageMeta,
@@ -58,11 +60,22 @@ export const api = {
       { projectId, imagePath },
     ),
 
-  fetchAnilistCover: (projectId: string, anilistId: number) =>
-    invoke<{ title: string; coverPath: string; coverThumbnailPath: string }>(
-      'fetch_anilist_cover',
-      { projectId, anilistId },
+  searchAnilistCovers: (query: string) =>
+    invoke<AnilistCandidate[]>('search_anilist_covers', { query }),
+
+  applyAnilistCover: (
+    projectId: string,
+    anilistId: number,
+    imageUrl: string,
+    title: string,
+  ) =>
+    invoke<{ coverPath: string; coverThumbnailPath: string }>(
+      'apply_anilist_cover',
+      { projectId, anilistId, imageUrl, title },
     ),
+
+  autoFillMissingCovers: (onEvent: Channel<BackfillEvent>) =>
+    invoke<void>('auto_fill_missing_covers', { onEvent }),
 
   removeProjectCover: (projectId: string) =>
     invoke<void>('remove_project_cover', { projectId }),

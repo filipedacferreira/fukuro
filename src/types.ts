@@ -15,6 +15,18 @@ export interface Project {
   coverTitle: string | null
 }
 
+export interface AnilistCandidate {
+  anilistId: number
+  title: string
+  year: number | null
+  thumbnailUrl: string
+  imageUrl: string
+}
+
+export type BackfillEvent =
+  | { type: 'progress'; current: number; total: number; applied: boolean }
+  | { type: 'done'; applied: number; total: number }
+
 export interface Chapter {
   id: string
   projectId: string

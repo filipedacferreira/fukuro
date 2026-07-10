@@ -1,6 +1,7 @@
+import { Channel } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import { FolderCog, FolderOpen } from 'lucide-react'
+import { FolderCog, FolderOpen, ImageDown } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
 import { Button, IconButton } from '@/components/ui/button'
@@ -8,7 +9,7 @@ import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
-import type { Project } from '@/types'
+import type { BackfillEvent, Project } from '@/types'
 import { ProjectRow } from './components/project-row'
 
 interface ProjectListProps {
@@ -20,6 +21,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
 
   useEffect(() => {
     api
@@ -95,6 +97,42 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
     }
   }
 
+  // Runs the same automatic-lookup-and-apply flow used for newly-discovered projects
+  // (see cover.rs::spawn_auto_cover_lookup) across every project currently missing a
+  // cover — the retroactive counterpart, for projects that predate this feature or whose
+  // automatic lookup was skipped for falling below the similarity threshold. Individual
+  // matches arrive via the existing `projects-updated` event (already listened to below),
+  // so this only needs to track its own loading state and show a summary toast at the end.
+  const handleAutoFillCovers = async () => {
+    setBackfilling(true)
+    const channel = new Channel<BackfillEvent>()
+    channel.onmessage = (event) => {
+      if (event.type === 'done') {
+        setBackfilling(false)
+        toast({
+          title:
+            event.total === 0
+              ? 'All projects already have covers'
+              : 'Cover auto-fill complete',
+          description:
+            event.total === 0
+              ? undefined
+              : `${event.applied} of ${event.total} covers found`,
+        })
+      }
+    }
+    try {
+      await api.autoFillMissingCovers(channel)
+    } catch (e) {
+      setBackfilling(false)
+      toast({
+        title: 'Cover auto-fill failed',
+        description: String(e),
+        variant: 'negative',
+      })
+    }
+  }
+
   const handleRename = (id: string, newName: string) => {
     setProjects((prev) =>
       prev.map((p) => (p.id === id ? { ...p, name: newName } : p)),
@@ -123,15 +161,28 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
           <h1 className="font-semibold text-base">Fukurō</h1>
         </div>
         {libraryRoot && (
-          <IconButton
-            variant="ghost"
-            size="sm"
-            aria-label="Change library folder"
-            title="Change library folder"
-            onClick={handleChangeLibrary}
-          >
-            <FolderCog className="size-4" />
-          </IconButton>
+          <div className="flex items-center gap-1">
+            <IconButton
+              variant="ghost"
+              size="sm"
+              aria-label="Auto-fill missing covers"
+              title="Auto-fill missing covers"
+              onClick={handleAutoFillCovers}
+              isLoading={backfilling}
+              disabled={backfilling}
+            >
+              <ImageDown className="size-4" />
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              aria-label="Change library folder"
+              title="Change library folder"
+              onClick={handleChangeLibrary}
+            >
+              <FolderCog className="size-4" />
+            </IconButton>
+          </div>
         )}
       </header>
 

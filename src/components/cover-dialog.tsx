@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { BookImage, Loader2, Trash2, Upload } from 'lucide-react'
+import { BookImage, Loader2, Search, Trash2, Upload } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -13,24 +13,12 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
-import type { CoverInfo } from '@/types'
+import type { AnilistCandidate, CoverInfo } from '@/types'
 
-const anilistSchema = z.object({
-  anilistId: z
-    .string()
-    .trim()
-    .min(1, 'Required')
-    // Accept either a bare ID ("30013") or an Anilist URL ("anilist.co/manga/30013/...").
-    .transform((val) => {
-      const match = val.match(/\/manga\/(\d+)/)
-      return match ? match[1] : val
-    })
-    .pipe(
-      z.string().regex(/^\d+$/, 'Must be a valid Anilist ID').transform(Number),
-    ),
+const searchSchema = z.object({
+  title: z.string().trim().min(1, 'Required'),
 })
-type AnilistInput = z.input<typeof anilistSchema> // { anilistId: string } — form field type
-type AnilistOutput = z.output<typeof anilistSchema> // { anilistId: number } — submit handler type
+type SearchValues = z.infer<typeof searchSchema>
 
 interface CoverDialogProps {
   projectId: string
@@ -53,21 +41,24 @@ export const CoverDialog: FC<CoverDialogProps> = ({
   // Mirrors the anilistId/coverTitle props but stays in sync with changes made this session.
   const [localAnilistId, setLocalAnilistId] = useState(anilistId)
   const [localCoverTitle, setLocalCoverTitle] = useState(coverTitle)
+  const [candidates, setCandidates] = useState<AnilistCandidate[] | null>(null)
+  const [applyingId, setApplyingId] = useState<number | null>(null)
 
   const {
     register,
     handleSubmit,
     reset: resetForm,
     formState: { errors, isSubmitting },
-  } = useForm<AnilistInput, unknown, AnilistOutput>({
-    resolver: zodResolver(anilistSchema),
+  } = useForm<SearchValues>({
+    resolver: zodResolver(searchSchema),
   })
 
   useEffect(() => {
     if (open) {
-      resetForm({ anilistId: anilistId ? String(anilistId) : '' })
+      resetForm({ title: '' })
       setLocalAnilistId(anilistId)
       setLocalCoverTitle(coverTitle)
+      setCandidates(null)
     }
   }, [open, anilistId, coverTitle, resetForm])
 
@@ -100,27 +91,51 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     }
   }
 
-  const handleFetchAnilist = async ({
-    anilistId: fetchedId,
-  }: AnilistOutput) => {
+  const handleSearch = async ({ title }: SearchValues) => {
+    setCandidates(null)
     try {
-      const result = await api.fetchAnilistCover(projectId, fetchedId)
-      onCoverChange({
-        coverPath: result.coverPath,
-        coverThumbnailPath: result.coverThumbnailPath,
-        anilistId: fetchedId,
-        coverTitle: result.title,
-      })
-      setLocalAnilistId(fetchedId)
-      setLocalCoverTitle(result.title)
-      resetForm({ anilistId: String(fetchedId) })
-      toast({ title: 'Cover fetched', description: result.title })
+      const results = await api.searchAnilistCovers(title)
+      setCandidates(results)
+      if (results.length === 0) {
+        toast({ title: 'No matches found', description: title })
+      }
     } catch (e) {
       toast({
-        title: 'Failed to fetch cover',
+        title: 'Search failed',
         description: String(e),
         variant: 'negative',
       })
+    }
+  }
+
+  const handleApplyCandidate = async (candidate: AnilistCandidate) => {
+    setApplyingId(candidate.anilistId)
+    try {
+      const result = await api.applyAnilistCover(
+        projectId,
+        candidate.anilistId,
+        candidate.imageUrl,
+        candidate.title,
+      )
+      onCoverChange({
+        coverPath: result.coverPath,
+        coverThumbnailPath: result.coverThumbnailPath,
+        anilistId: candidate.anilistId,
+        coverTitle: candidate.title,
+      })
+      setLocalAnilistId(candidate.anilistId)
+      setLocalCoverTitle(candidate.title)
+      setCandidates(null)
+      resetForm({ title: '' })
+      toast({ title: 'Cover updated', description: candidate.title })
+    } catch (e) {
+      toast({
+        title: 'Failed to set cover',
+        description: String(e),
+        variant: 'negative',
+      })
+    } finally {
+      setApplyingId(null)
     }
   }
 
@@ -148,6 +163,8 @@ export const CoverDialog: FC<CoverDialogProps> = ({
     }
   }
 
+  const busy = uploading || removing || isSubmitting
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <Dialog.Content className="w-80">
@@ -167,12 +184,12 @@ export const CoverDialog: FC<CoverDialogProps> = ({
                 <BookImage className="size-8 text-foreground-secondary" />
               </div>
             )}
-            {(isSubmitting || uploading) && (
+            {(busy || applyingId !== null) && (
               <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-background/60 backdrop-blur-sm">
                 <Loader2 className="size-6 animate-spin text-foreground-secondary" />
               </div>
             )}
-            {coverPath && !isSubmitting && !uploading && (
+            {coverPath && !busy && applyingId === null && (
               <button
                 type="button"
                 aria-label="Remove cover"
@@ -193,29 +210,25 @@ export const CoverDialog: FC<CoverDialogProps> = ({
             className="w-full"
             onClick={handleUpload}
             isLoading={uploading}
-            disabled={uploading || removing || isSubmitting}
+            disabled={busy}
           >
             <Upload className="size-4" />
             Upload image
           </Button>
 
-          {/* Anilist fetch */}
-          <Field invalid={!!errors.anilistId}>
+          {/* Anilist search */}
+          <Field invalid={!!errors.title}>
             <Field.Label className="font-normal text-foreground-secondary text-xs">
-              Fetch from Anilist
+              Search Anilist
             </Field.Label>
-            <form
-              onSubmit={handleSubmit(handleFetchAnilist)}
-              className="flex gap-2"
-            >
+            <form onSubmit={handleSubmit(handleSearch)} className="flex gap-2">
               <Field.Control>
                 <Input
-                  {...register('anilistId')}
-                  placeholder="Manga ID"
-                  inputMode="numeric"
+                  {...register('title')}
+                  placeholder="Series title"
                   size="sm"
-                  invalid={!!errors.anilistId || undefined}
-                  disabled={uploading || removing || isSubmitting}
+                  invalid={!!errors.title || undefined}
+                  disabled={busy}
                   className="flex-1"
                 />
               </Field.Control>
@@ -223,26 +236,63 @@ export const CoverDialog: FC<CoverDialogProps> = ({
                 type="submit"
                 size="sm"
                 isLoading={isSubmitting}
-                disabled={uploading || removing || isSubmitting}
+                disabled={busy}
               >
-                Fetch
+                <Search className="size-4" />
               </Button>
             </form>
-            <Field.Error>{errors.anilistId?.message}</Field.Error>
-            {(localCoverTitle || localAnilistId) && !errors.anilistId && (
-              <Field.Description className="flex flex-col gap-0.5">
-                <span>Fetched from Anilist:</span>
-                <button
-                  type="button"
-                  className="cursor-pointer text-start text-foreground underline-offset-2 hover:underline"
-                  onClick={() =>
-                    openUrl(`https://anilist.co/manga/${localAnilistId}`)
-                  }
-                >
-                  {localCoverTitle ?? `ID ${localAnilistId}`}
-                </button>
-              </Field.Description>
+            <Field.Error>{errors.title?.message}</Field.Error>
+
+            {candidates && candidates.length > 0 && (
+              <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+                {candidates.map((candidate) => (
+                  <li key={candidate.anilistId}>
+                    <button
+                      type="button"
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-md p-1.5 text-start hover:bg-background-secondary disabled:cursor-default disabled:opacity-60"
+                      onClick={() => handleApplyCandidate(candidate)}
+                      disabled={applyingId !== null}
+                    >
+                      <img
+                        src={candidate.thumbnailUrl}
+                        alt=""
+                        className="h-12 w-8 shrink-0 rounded-sm object-cover"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">
+                          {candidate.title}
+                        </span>
+                        {candidate.year && (
+                          <span className="block text-foreground-secondary text-xs">
+                            {candidate.year}
+                          </span>
+                        )}
+                      </span>
+                      {applyingId === candidate.anilistId && (
+                        <Loader2 className="size-4 shrink-0 animate-spin text-foreground-secondary" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
+
+            {(localCoverTitle || localAnilistId) &&
+              !errors.title &&
+              !candidates && (
+                <Field.Description className="flex flex-col gap-0.5">
+                  <span>Fetched from Anilist:</span>
+                  <button
+                    type="button"
+                    className="cursor-pointer text-start text-foreground underline-offset-2 hover:underline"
+                    onClick={() =>
+                      openUrl(`https://anilist.co/manga/${localAnilistId}`)
+                    }
+                  >
+                    {localCoverTitle ?? `ID ${localAnilistId}`}
+                  </button>
+                </Field.Description>
+              )}
           </Field>
         </div>
       </Dialog.Content>

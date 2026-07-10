@@ -4,7 +4,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Archive, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { CoverDialog } from '@/components/cover-dialog'
 import { CoverThumbnail } from '@/components/cover-thumbnail'
@@ -143,6 +143,32 @@ export const ProjectRow: FC<ProjectRowProps> = ({
   const [coverDialogOpen, setCoverDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
+
+  // Re-sync the cover from props when it changes externally — e.g. a background
+  // Anilist auto-lookup (see cover.rs::spawn_auto_cover_lookup) or the bulk backfill
+  // resolves and the parent's `projects` array updates via the `projects-updated` event.
+  // Manual edits made through CoverDialog only ever change local `cover` state, never the
+  // `project` prop, so they never re-trigger this effect. Skips the first run so mounting
+  // doesn't immediately bust the cache-busting `coverVersion` it was just initialised with.
+  const skipNextCoverSync = useRef(true)
+  useEffect(() => {
+    if (skipNextCoverSync.current) {
+      skipNextCoverSync.current = false
+      return
+    }
+    setCover({
+      coverPath: project.coverPath,
+      coverThumbnailPath: project.coverThumbnailPath,
+      anilistId: project.anilistId,
+      coverTitle: project.coverTitle,
+    })
+    setCoverVersion(Date.now())
+  }, [
+    project.coverPath,
+    project.coverThumbnailPath,
+    project.anilistId,
+    project.coverTitle,
+  ])
 
   const date = new Date(project.createdAt * 1000).toLocaleDateString(
     undefined,
