@@ -147,6 +147,35 @@ pub fn initialize(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // v9: export history + Kobo sync tracking. last_export_path/last_exported_at record
+    // where and when the project's .cbz was last written to disk (set by create_cbz);
+    // last_synced_at records when that file was last copied onto a Kobo device. Keeping
+    // these as two separate nullable timestamps (rather than one) lets the UI tell "never
+    // exported" (both null) apart from "exported but not yet on the device" (exported set,
+    // synced null) and "outdated on the device" (exported > synced). Timestamps are Unix
+    // epoch seconds (INTEGER), matching the existing `created_at` column, rather than an
+    // ISO-8601 string — no date/time crate is otherwise needed in this codebase, and a plain
+    // epoch number is what the client-side "outdated" comparison and "X days ago" display
+    // actually want.
+    if !column_exists(conn, "projects", "last_export_path") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN last_export_path TEXT;")?;
+    }
+    if !column_exists(conn, "projects", "last_exported_at") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN last_exported_at INTEGER;")?;
+    }
+    if !column_exists(conn, "projects", "last_synced_at") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN last_synced_at INTEGER;")?;
+    }
+
+    // v10: Kobo sync stopped reusing the user-facing last_export_path/last_exported_at (the
+    // manual "Export CBZ" file) as its own local cache — syncing now always writes to a fixed
+    // AppData path the user never picks or sees (see kobo.rs's kobo_cache_path), so it never
+    // needs a save-location prompt. That cache needs its own freshness timestamp, independent
+    // of whatever the user's own last manual export was.
+    if !column_exists(conn, "projects", "last_kobo_export_at") {
+        conn.execute_batch("ALTER TABLE projects ADD COLUMN last_kobo_export_at INTEGER;")?;
+    }
+
     // v8: chapter display_name is no longer a user-editable label (the rename UI and
     // rename_chapter command are gone) — it's now purely a read-only mirror of the
     // chapter folder's name, auto-sorted instead of manually reordered. Any name a user
