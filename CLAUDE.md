@@ -267,6 +267,11 @@ Composability over configuration. When a component grows hard to read, break it 
 
 Foundations UI components, hooks, and utils are **not** installed as a package — they are copied source files from [foundations.significa.co](https://foundations.significa.co). When updating a component, copy the new source from the site rather than editing in place.
 
+**Looking anything up on Foundations — a component's exact source, its dependencies, usage docs, whether a component exists at all — always use `curl` against `foundations.significa.co/llms.txt`, not WebFetch.** WebFetch summarizes pages through a smaller model, which has already silently dropped or garbled source code details in this project. `curl` gets the raw text directly.
+
+- `curl https://foundations.significa.co/llms.txt` — the full site index: every page's path and a one-line description, grouped by section (`ui`, `components`, etc).
+- `curl https://foundations.significa.co/{path}/llms.txt` (path from the index, e.g. `ui/button`, `components/marquee`) — that page's full docs in plain text: description, dependencies (as further `llms.txt` links to follow if needed), and the complete current source code block.
+
 They live alongside all other app code with no special namespace:
 - UI components: `src/components/ui/{name}.tsx` (button, dialog, disclosure, divider, field, input, modal, progress, skeleton, spinner, toaster, tooltip, slot)
 - Hooks: `src/hooks/{name}.ts` (use-element-transition, use-top-layer)
