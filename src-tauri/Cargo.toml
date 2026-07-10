@@ -27,3 +27,6 @@ rayon = "1"
 fast_image_resize = "4"
 reqwest = { version = "0.12", features = ["json"] }
 notify = "6"
+strsim = "0.11"
+regex = "1"
+tokio = { version = "1", features = ["sync"] }

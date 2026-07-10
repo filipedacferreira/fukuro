@@ -43,6 +43,13 @@ pub fn run() {
             // populated below once we know whether a library root is already configured.
             app.manage(commands::watch::WatcherState(Mutex::new(None)));
 
+            // Bounds how many Anilist cover lookups run concurrently (see
+            // commands/cover.rs), shared across automatic per-project lookups and the
+            // manual bulk backfill.
+            app.manage(commands::cover::CoverLookupSemaphore(std::sync::Arc::new(
+                tokio::sync::Semaphore::new(4),
+            )));
+
             // If the user already configured a library root in a previous session, start
             // watching it immediately so the projects list is live as soon as it's shown.
             // No-op (returns Ok without starting anything) if no root is configured yet —
@@ -124,7 +131,9 @@ pub fn run() {
             commands::images::hard_delete_image,
             commands::export::create_cbz,
             commands::cover::set_project_cover,
-            commands::cover::fetch_anilist_cover,
+            commands::cover::search_anilist_covers,
+            commands::cover::apply_anilist_cover,
+            commands::cover::auto_fill_missing_covers,
             commands::cover::remove_project_cover,
         ])
         .run(tauri::generate_context!())

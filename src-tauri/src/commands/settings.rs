@@ -52,6 +52,7 @@ pub fn set_library_root(
         return Err(format!("Not a directory: {}", root_path));
     }
 
+    let new_projects: Vec<(String, String)>;
     {
         let conn = db_state.0.lock().map_err(|e| e.to_string())?;
 
@@ -93,8 +94,15 @@ pub fn set_library_root(
         )
         .map_err(|e| e.to_string())?;
 
-        insert_new_projects(&conn, &root_path)?;
+        new_projects = insert_new_projects(&conn, &root_path)?;
     } // lock released before restarting the watcher, which acquires it again internally
+
+    // Fire-and-forget automatic cover lookups for every project just discovered — see
+    // cover.rs::spawn_auto_cover_lookup. A first-time import can be hundreds of projects,
+    // so these are bounded by CoverLookupSemaphore rather than run inline here.
+    for (project_id, name) in new_projects {
+        crate::commands::cover::spawn_auto_cover_lookup(&app, project_id, name);
+    }
 
     start_library_watcher(&app)?;
 

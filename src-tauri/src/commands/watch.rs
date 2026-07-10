@@ -86,12 +86,17 @@ pub fn start_library_watcher(app: &AppHandle) -> Result<(), String> {
 
             if normalized_parent == normalized_root {
                 // A manga folder appeared or disappeared directly under the library root.
-                let inserted = insert_new_projects(&conn, &library_root).unwrap_or(false);
+                let new_projects = insert_new_projects(&conn, &library_root).unwrap_or_default();
                 let removed = remove_missing_projects(&conn, &app_for_handler).unwrap_or(false);
-                if inserted || removed {
+                if !new_projects.is_empty() || removed {
                     if let Ok(projects) = query_all_projects(&conn) {
                         let _ = app_for_handler.emit("projects-updated", projects);
                     }
+                }
+                // Kick off an automatic cover lookup for each newly-discovered project —
+                // see cover.rs::spawn_auto_cover_lookup for why this is fire-and-forget.
+                for (project_id, name) in new_projects {
+                    crate::commands::cover::spawn_auto_cover_lookup(&app_for_handler, project_id, name);
                 }
                 continue;
             }

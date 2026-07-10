@@ -108,10 +108,19 @@ pub fn list_projects(
         return Ok(Vec::new());
     };
 
-    insert_new_projects(&conn, &library_root)?;
+    let new_projects = insert_new_projects(&conn, &library_root)?;
     remove_missing_projects(&conn, &app_handle)?;
 
-    query_all_projects(&conn)
+    let projects = query_all_projects(&conn)?;
+    drop(conn); // release the lock before spawning lookups, which will re-acquire it later
+
+    // Fire-and-forget: each spawned task does its own network/DB work on its own schedule,
+    // bounded by CoverLookupSemaphore. See cover.rs::spawn_auto_cover_lookup.
+    for (project_id, name) in new_projects {
+        crate::commands::cover::spawn_auto_cover_lookup(&app_handle, project_id, name);
+    }
+
+    Ok(projects)
 }
 
 // Permanently deletes a manga: removes its folder (and everything in it) from disk, then
@@ -214,10 +223,14 @@ pub(crate) fn cleanup_project_assets(
 // as projects (mangas), each with its own chapters scanned immediately — a manga folder
 // can already contain chapter subfolders the first time we see it (e.g. it existed on
 // disk before the library root was configured, or was just copied in wholesale).
-// Shared by `list_projects` (rescan on read) and the library watcher in `watch.rs`
-// (rescan on filesystem change). Returns whether any projects were inserted, so callers
-// can decide whether to notify the frontend.
-pub(crate) fn insert_new_projects(conn: &Connection, library_root: &str) -> Result<bool, String> {
+// Shared by `list_projects` (rescan on read), `set_library_root`, and the library watcher
+// in `watch.rs` (rescan on filesystem change). Returns the (id, name) of every project just
+// inserted, so callers can both decide whether to notify the frontend and kick off an
+// automatic cover lookup for each one (see cover.rs::spawn_auto_cover_lookup).
+pub(crate) fn insert_new_projects(
+    conn: &Connection,
+    library_root: &str,
+) -> Result<Vec<(String, String)>, String> {
     // Collect the root_paths of projects already in the DB into a HashSet for O(1) lookup.
     let existing: HashSet<String> = {
         let mut stmt = conn
@@ -241,7 +254,7 @@ pub(crate) fn insert_new_projects(conn: &Connection, library_root: &str) -> Resu
         .collect();
     new_dirs.sort_by_key(|e| e.file_name());
 
-    let inserted_any = !new_dirs.is_empty();
+    let mut inserted = Vec::with_capacity(new_dirs.len());
 
     for entry in &new_dirs {
         let root_path = normalize_path(&entry.path());
@@ -259,9 +272,10 @@ pub(crate) fn insert_new_projects(conn: &Connection, library_root: &str) -> Resu
         .map_err(|e| e.to_string())?;
 
         insert_new_chapters(conn, &project_id, &root_path)?;
+        inserted.push((project_id, name));
     }
 
-    Ok(inserted_any)
+    Ok(inserted)
 }
 
 // Deletes projects whose root_path no longer exists on disk, cleaning up their cached
