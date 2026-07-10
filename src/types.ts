@@ -13,6 +13,10 @@ export interface Project {
   coverThumbnailPath: string | null
   anilistId: number | null
   coverTitle: string | null
+  lastExportPath: string | null
+  lastExportedAt: number | null
+  lastKoboExportAt: number | null
+  lastSyncedAt: number | null
 }
 
 export interface AnilistCandidate {
@@ -54,3 +58,28 @@ export type ExportEvent =
   | { type: 'progress'; current: number; total: number }
   | { type: 'done'; outputPath: string }
   | { type: 'error'; message: string }
+
+export interface KoboDevice {
+  drivePath: string
+  label: string | null
+  freeBytes: number
+  totalBytes: number
+}
+
+export type SyncEvent =
+  | { type: 'exporting'; current: number; total: number }
+  | { type: 'copying'; current: number; total: number }
+  | { type: 'done'; devicePath: string }
+  | { type: 'error'; message: string }
+
+export type SyncAllEvent =
+  | {
+      type: 'progress'
+      current: number
+      total: number
+      projectId: string
+      projectName: string
+      success: boolean
+      error: string | null
+    }
+  | { type: 'done'; synced: number; total: number }

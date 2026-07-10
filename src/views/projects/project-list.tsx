@@ -8,8 +8,10 @@ import { Button, IconButton } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
+import { useKoboDevice } from '@/hooks/use-kobo-device'
 import { api } from '@/lib/tauri'
 import type { BackfillEvent, Project } from '@/types'
+import { KoboDeviceBadge } from './components/kobo-device-badge'
 import { ProjectRow } from './components/project-row'
 
 interface ProjectListProps {
@@ -23,6 +25,7 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
   const [switchingLibrary, setSwitchingLibrary] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
+  const koboDevice = useKoboDevice()
 
   useEffect(() => {
     api
@@ -144,6 +147,33 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
     )
   }
 
+  const handleProjectSynced = (projectId: string, success: boolean) => {
+    if (success) {
+      // A successful sync_project (kobo.rs) guarantees the Kobo cache is now fresh too — it
+      // re-exports its own AppData copy first whenever lastKoboExportAt was null (see
+      // invalidate_export in images.rs). Patching only lastSyncedAt would leave a
+      // previously-invalidated project reading as still outdated even though the DB now has
+      // a fresh, non-null last_kobo_export_at that matches or precedes last_synced_at.
+      const now = Math.floor(Date.now() / 1000)
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId
+            ? { ...p, lastKoboExportAt: now, lastSyncedAt: now }
+            : p,
+        ),
+      )
+    }
+  }
+
+  const handleProjectPatched = (
+    projectId: string,
+    patch: Pick<Project, 'lastKoboExportAt' | 'lastSyncedAt'>,
+  ) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === projectId ? { ...p, ...patch } : p)),
+    )
+  }
+
   const handleDelete = async (id: string) => {
     try {
       await api.deleteProject(id)
@@ -171,6 +201,13 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
         </div>
         {libraryRoot && (
           <div className="flex items-center gap-1">
+            {koboDevice && (
+              <KoboDeviceBadge
+                device={koboDevice}
+                projects={projects}
+                onProjectSynced={handleProjectSynced}
+              />
+            )}
             <IconButton
               variant="ghost"
               size="sm"
@@ -216,6 +253,8 @@ export const ProjectList: FC<ProjectListProps> = ({ onOpenProject }) => {
                 onOpen={onOpenProject}
                 onDelete={() => handleDelete(project.id)}
                 onRename={handleRename}
+                koboDevice={koboDevice}
+                onSynced={(patch) => handleProjectPatched(project.id, patch)}
               />
             ))}
           </ul>

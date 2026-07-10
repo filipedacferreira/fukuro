@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Channel } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { Archive, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Archive, MoreHorizontal, Pencil, Send, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
@@ -13,10 +13,12 @@ import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Menu } from '@/components/ui/menu'
 import { toast } from '@/components/ui/toaster'
+import { useKoboSync } from '@/hooks/use-kobo-sync'
+import { formatRelativeTime } from '@/lib/kobo'
 import { api } from '@/lib/tauri'
 import type { RenameValues } from '@/lib/validation'
 import { renameSchema } from '@/lib/validation'
-import type { CoverInfo, ExportEvent, Project } from '@/types'
+import type { CoverInfo, ExportEvent, KoboDevice, Project } from '@/types'
 
 interface ProjectRenameDialogProps {
   open: boolean
@@ -154,6 +156,8 @@ interface ProjectRowProps {
   onOpen: (project: Project) => void
   onDelete: () => Promise<void>
   onRename: (id: string, newName: string) => void
+  koboDevice: KoboDevice | null
+  onSynced: (patch: Pick<Project, 'lastKoboExportAt' | 'lastSyncedAt'>) => void
 }
 
 export const ProjectRow: FC<ProjectRowProps> = ({
@@ -161,9 +165,12 @@ export const ProjectRow: FC<ProjectRowProps> = ({
   onOpen,
   onDelete,
   onRename,
+  koboDevice,
+  onSynced,
 }) => {
   const [localName, setLocalName] = useState(project.name)
   const [exporting, setExporting] = useState(false)
+  const { sync: syncToKobo, syncing } = useKoboSync(project, onSynced)
   const [cover, setCover] = useState<CoverInfo>({
     coverPath: project.coverPath,
     coverThumbnailPath: project.coverThumbnailPath,
@@ -291,6 +298,11 @@ export const ProjectRow: FC<ProjectRowProps> = ({
               {project.chapterCount}{' '}
               {project.chapterCount === 1 ? 'chapter' : 'chapters'} · {date}
             </span>
+            {project.lastExportedAt != null && (
+              <span className="text-foreground-secondary text-xs">
+                Last exported: {formatRelativeTime(project.lastExportedAt)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -316,6 +328,12 @@ export const ProjectRow: FC<ProjectRowProps> = ({
                 <Archive className="size-4" />
                 Export CBZ
               </Menu.Item>
+              {koboDevice && (
+                <Menu.Item onSelect={syncToKobo} disabled={syncing}>
+                  <Send className="size-4" />
+                  Send to device
+                </Menu.Item>
+              )}
               <Menu.Divider />
               <Menu.Item
                 variant="destructive"

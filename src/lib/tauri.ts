@@ -5,7 +5,10 @@ import type {
   Chapter,
   ExportEvent,
   ImageMeta,
+  KoboDevice,
   Project,
+  SyncAllEvent,
+  SyncEvent,
   ThumbnailUpdate,
 } from '@/types'
 
@@ -73,4 +76,12 @@ export const api = {
 
   removeProjectCover: (projectId: string) =>
     invoke<void>('remove_project_cover', { projectId }),
+
+  getKoboDevice: () => invoke<KoboDevice | null>('get_kobo_device'),
+
+  syncProjectToKobo: (projectId: string, onEvent: Channel<SyncEvent>) =>
+    invoke<void>('sync_project_to_kobo', { projectId, onEvent }),
+
+  syncAllToKobo: (onEvent: Channel<SyncAllEvent>) =>
+    invoke<void>('sync_all_to_kobo', { onEvent }),
 }

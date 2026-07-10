@@ -133,11 +133,7 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
           )}
         </motion.div>
 
-        <ExportPanel
-          projectId={project.id}
-          projectName={project.name}
-          hasChapters={chapters.length > 0}
-        />
+        <ExportPanel project={project} hasChapters={chapters.length > 0} />
       </div>
     </div>
   )

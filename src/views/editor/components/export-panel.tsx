@@ -1,43 +1,41 @@
 import { Channel } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
-import { Archive } from 'lucide-react'
+import { Archive, Send } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/components/ui/toaster'
+import { useKoboDevice } from '@/hooks/use-kobo-device'
+import { useKoboSync } from '@/hooks/use-kobo-sync'
 import { api } from '@/lib/tauri'
-import type { ExportEvent } from '@/types'
+import type { ExportEvent, Project } from '@/types'
 
 interface ExportPanelProps {
-  projectId: string
-  projectName: string
+  project: Project
   hasChapters: boolean
 }
 
-export const ExportPanel: FC<ExportPanelProps> = ({
-  projectId,
-  projectName,
-  hasChapters,
-}) => {
+export const ExportPanel: FC<ExportPanelProps> = ({ project, hasChapters }) => {
   const [progress, setProgress] = useState<{
     current: number
     total: number
   } | null>(null)
 
+  const koboDevice = useKoboDevice()
+  // No onSynced callback needed here — unlike ProjectRow, this view doesn't display any
+  // device-sync status that would need updating after a successful "Send to device".
+  const {
+    sync: syncToKobo,
+    progress: syncProgress,
+    syncing,
+  } = useKoboSync(project, () => {})
+
   const exporting = progress !== null
 
-  const handleExport = async () => {
-    const outputPath = await save({
-      filters: [{ name: 'Comic Book Archive', extensions: ['cbz'] }],
-      defaultPath: `${projectName}.cbz`,
-    })
-    if (!outputPath) return
-
+  const runExport = async (outputPath: string) => {
     setProgress({ current: 0, total: 0 })
-
-    const path = outputPath as string
 
     const channel = new Channel<ExportEvent>()
     channel.onmessage = (event) => {
@@ -47,10 +45,10 @@ export const ExportPanel: FC<ExportPanelProps> = ({
         setProgress(null)
         toast({
           title: 'CBZ created',
-          description: path,
+          description: outputPath,
           action: {
             label: 'Show in folder',
-            onClick: () => revealItemInDir(path),
+            onClick: () => revealItemInDir(outputPath),
           },
         })
       } else if (event.type === 'error') {
@@ -63,7 +61,7 @@ export const ExportPanel: FC<ExportPanelProps> = ({
     }
 
     try {
-      await api.createCbz(projectId, outputPath as string, channel)
+      await api.createCbz(project.id, outputPath, channel)
     } catch (e) {
       setProgress(null)
       toast({
@@ -73,13 +71,26 @@ export const ExportPanel: FC<ExportPanelProps> = ({
     }
   }
 
+  const handleExport = async () => {
+    const outputPath = await save({
+      filters: [{ name: 'Comic Book Archive', extensions: ['cbz'] }],
+      defaultPath: `${project.name}.cbz`,
+    })
+    if (!outputPath) return
+    await runExport(outputPath as string)
+  }
+
   return (
     <div className="flex items-center justify-end gap-3 border-border border-t bg-background px-4 py-3">
       <div className="flex flex-1 flex-col gap-1.5">
         <p className="text-foreground-secondary text-xs">
           {exporting
             ? 'Exporting…'
-            : 'Images marked as excluded will be skipped during export.'}
+            : syncing
+              ? syncProgress?.phase === 'exporting'
+                ? 'Exporting…'
+                : 'Sending to device…'
+              : 'Images marked as excluded will be skipped during export.'}
         </p>
         {exporting && (
           <Progress
@@ -89,10 +100,27 @@ export const ExportPanel: FC<ExportPanelProps> = ({
             className="max-w-32"
           />
         )}
+        {syncing && syncProgress && (
+          <Progress
+            value={syncProgress.current}
+            max={syncProgress.total || 1}
+            size="sm"
+            className="max-w-32"
+          />
+        )}
       </div>
       <Button
+        onClick={syncToKobo}
+        disabled={!koboDevice || exporting || syncing}
+        size="sm"
+        variant="outline"
+      >
+        <Send className="size-4" />
+        Send to device
+      </Button>
+      <Button
         onClick={handleExport}
-        disabled={!hasChapters || exporting}
+        disabled={!hasChapters || exporting || syncing}
         size="sm"
       >
         <Archive className="size-4" />
