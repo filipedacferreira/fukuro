@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use rusqlite::{Connection, Result, params};
 
 // DbState is a newtype wrapper around a Mutex-protected SQLite connection.
@@ -143,6 +145,50 @@ pub fn initialize(conn: &Connection) -> Result<()> {
              ALTER TABLE projects RENAME COLUMN mangaupdates_id TO anilist_id;
              UPDATE projects SET anilist_id = NULL;",
         )?;
+    }
+
+    // v8: chapter display_name is no longer a user-editable label (the rename UI and
+    // rename_chapter command are gone) — it's now purely a read-only mirror of the
+    // chapter folder's name, auto-sorted instead of manually reordered. Any name a user
+    // customized before this change would otherwise keep showing as a label that no
+    // longer matches its actual folder, so resync every row from folder_path once here.
+    // This has no schema change to gate on, and re-running it is harmless (folder_path
+    // only changes when a chapter is deleted and reinserted, which already sets
+    // display_name fresh), so it just runs unconditionally on every launch.
+    resync_chapter_display_names(conn)?;
+
+    Ok(())
+}
+
+fn resync_chapter_display_names(conn: &Connection) -> Result<()> {
+    // Collect first — SQLite can't UPDATE a row while a SELECT statement holding a
+    // borrow of `conn` is still open over it.
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = conn.prepare("SELECT id, folder_path, display_name FROM chapters")?;
+        let result: Vec<(String, String, String)> = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    for (id, folder_path, display_name) in rows {
+        // file_name() reads the last path segment regardless of which separator the
+        // stored path uses — folder_path is normalized to forward slashes, but this
+        // works for either.
+        let basename = Path::new(&folder_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or(folder_path);
+
+        if basename != display_name {
+            conn.execute(
+                "UPDATE chapters SET display_name = ?1 WHERE id = ?2",
+                params![basename, id],
+            )?;
+        }
     }
 
     Ok(())
