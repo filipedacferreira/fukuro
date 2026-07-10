@@ -357,9 +357,18 @@ pub fn sync_project_to_kobo(
 // Emitted once per project as `sync_all_to_kobo` works through its queue — deliberately
 // coarser than `SyncEvent` (no byte-level progress): the roadmap calls for the same
 // idle/syncing/done/failed granularity Batch export uses per row, not a progress bar per file.
+//
+// `Started` fires immediately *before* a project's sync begins, `Progress` immediately after
+// it finishes. The frontend needs the `Started` signal to light up the currently-syncing row:
+// it can't predict which project is next on its own, since the candidate set is computed here
+// (it includes the device-missing scan below, which the UI can't replicate) and the DB query
+// imposes no ordering the UI could mirror.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum SyncAllEvent {
+    Started {
+        project_id: String,
+    },
     Progress {
         current: usize,
         total: usize,
@@ -450,6 +459,11 @@ pub fn sync_all_to_kobo(
     std::thread::spawn(move || {
         let mut synced = 0;
         for (i, target) in targets.iter().enumerate() {
+            // Tell the UI this row is now the one uploading, so it can show a live spinner —
+            // see `SyncAllEvent`'s doc comment for why the frontend can't infer this itself.
+            let _ = on_event.send(SyncAllEvent::Started {
+                project_id: target.project_id.clone(),
+            });
             // Byte/page-level progress isn't surfaced here — see `SyncAllEvent`'s doc comment.
             let result = sync_project(&app_handle, &device, target, |_, _| {}, |_, _| {});
             let success = result.is_ok();

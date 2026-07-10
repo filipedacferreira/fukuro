@@ -73,6 +73,7 @@ export type SyncEvent =
   | { type: 'error'; message: string }
 
 export type SyncAllEvent =
+  | { type: 'started'; projectId: string }
   | {
       type: 'progress'
       current: number
