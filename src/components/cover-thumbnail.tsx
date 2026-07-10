@@ -28,10 +28,10 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
       type="button"
       aria-label="Change cover"
       className={cn(
-        'focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer overflow-hidden outline-none ring-ring focus-visible:ring-inset',
+        'focus-visible:ring-(length:--ring-width) shrink-0 cursor-pointer outline-none ring-ring focus-visible:ring-inset',
         size === 'sm'
-          ? 'rounded-sm transition will-change-transform active:scale-95'
-          : 'aspect-2/3 h-full w-18 rounded-lg',
+          ? 'overflow-hidden rounded-sm transition will-change-transform active:scale-95'
+          : 'relative aspect-2/3 h-full w-18 overflow-hidden rounded-lg',
         className,
       )}
       onClick={onClick}
@@ -42,14 +42,21 @@ export const CoverThumbnail: FC<CoverThumbnailProps> = ({
           alt="Cover"
           className={cn(
             'object-cover',
-            size === 'sm' ? 'h-8 w-auto rounded' : 'h-full w-full',
+            // 'lg' fills the button via absolute positioning rather than percentage
+            // height/width — <img> is a replaced element with its own intrinsic-ratio-aware
+            // algorithm for resolving percentage sizes, which can (and did, measurably)
+            // resolve a few pixels differently than the plain <div> placeholder below did
+            // in the same stretched-flex-item spot, shifting the whole card when the two
+            // swap. Absolute positioning fills the containing block's box directly, using
+            // the same unambiguous algorithm regardless of element type.
+            size === 'sm' ? 'h-8 w-auto rounded' : 'absolute inset-0 size-full',
           )}
         />
       ) : (
         <div
           className={cn(
             'flex items-center justify-center bg-background-secondary',
-            size === 'sm' ? 'h-8 w-6 rounded' : 'h-full w-full',
+            size === 'sm' ? 'h-8 w-6 rounded' : 'absolute inset-0 size-full',
           )}
         >
           <BookImage
