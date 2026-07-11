@@ -10,7 +10,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 | Frontend | React 19 + TypeScript + Vite |
 | Styling | Tailwind CSS v4 via `@tailwindcss/vite` |
 | Components | Significa Foundations (copied into `src/components/ui/`) |
-| Drag-to-reorder | motion/react (`Reorder`) |
+| Scroll layout animation | motion/react (`layoutScroll`) |
 | Local DB | SQLite via `rusqlite` (bundled) |
 | Zipping | `zip` crate |
 | HTTP client | `reqwest` (async + json features) |
@@ -50,9 +50,9 @@ src/
     editor/                       # Editor view
       editor.tsx                  # Main workspace: chapter list + export panel
       components/
-        chapter-list.tsx          # DnD context + sortable list
-        chapter-item.tsx          # Drag orchestration + scroll behaviour; composes ChapterRow + ImageGrid
-        chapter-row.tsx           # Chapter header row: drag handle, inline rename, image count
+        chapter-list.tsx          # Renders the auto-sorted chapter list (empty-state fallback)
+        chapter-item.tsx          # Disclosure wrapper + scroll-into-view on expand; composes ChapterRow + ImageGrid
+        chapter-row.tsx           # Chapter header row: derived "Chapter N" label + folder name, image/excluded count
         image-grid.tsx            # Thumbnail grid with exclusion toggle + streaming optimiser
         image-card.tsx            # Single image card with exclude toggle + delete dialog
         export-panel.tsx          # Save dialog + Export CBZ button + Send to device button
@@ -69,12 +69,11 @@ src/
 src-tauri/src/
   lib.rs                          # Tauri builder: plugin init, DB setup, command registry, native menu
   db.rs                           # DbState type + SQLite schema migration
-  utils.rs                        # Shared helpers: is_image_file, natural_sort_key, now_unix
+  utils.rs                        # Shared helpers: normalize_path, now_unix, is_image_file, natural_sort_key, extract_chapter_number
   commands/
     mod.rs
     settings.rs                   # get_library_root, set_library_root; read_library_root helper
-    projects.rs                   # list_projects, delete_project, rename_project, get_project_chapters, insert/remove_new_*_projects, cleanup_project_assets, clear_stale_export_paths
-    chapters.rs                   # reorder_chapters, rename_chapter
+    projects.rs                   # list_projects, delete_project, rename_project, get_project_chapters, insert/remove_new_*_projects/chapters, recompute_sort_order, cleanup_project_assets, clear_stale_export_paths
     images.rs                     # get_chapter_images, toggle_exclusion, hard_delete_image, invalidate_export
     thumbnails.rs                 # generate_chapter_thumbnails_stream, clear_thumbnail_cache, ensure_thumbnail
     export.rs                     # create_cbz; collect_cbz_source/write_cbz_archive (shared with kobo.rs's sync)
@@ -114,9 +113,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `list_projects()` | Rescans the library root (new manga subfolders inserted, missing ones removed) and returns projects ordered by `created_at DESC`; returns `[]` if no library root is configured. Also clears `last_export_path`/`last_exported_at` for any project whose exported file has been deleted externally (`clear_stale_export_paths`) |
 | `delete_project(id)` | **Permanently deletes the manga's folder from disk** (`fs::remove_dir_all`), then cascade-deletes its DB row (chapters + exclusions) and cleans up its cached cover/thumbnails. If the folder can't be removed (e.g. a file inside is open elsewhere), the error is returned and the DB row is left untouched |
 | `rename_project(id, name)` | Update project display name (does not rename the folder on disk) |
-| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, and deletes chapters whose folder no longer exists |
-| `reorder_chapters(chapterIds[])` | Bulk update `sort_order` after drag-drop |
-| `rename_chapter(id, name)` | Update `display_name` |
+| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, deletes chapters whose folder no longer exists, and re-derives every `sort_order` from the folder name via `recompute_sort_order` (natural sort) so the list always reads in order. `chapterNumber` is derived from the folder name at read time (`extract_chapter_number`), not stored |
 | `get_chapter_images(chapterId)` | FS read + natural sort, with `isExcluded` and `thumbnailPath` |
 | `toggle_exclusion(chapterId, imagePath)` | Insert/delete from `excluded_images`, returns new state |
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + thumbnail cache cleanup + DB cleanup |
@@ -350,9 +347,13 @@ Images are stored with zero-padded sequential names regardless of original filen
 
 Ensures correct display order in all CBZ readers.
 
+## Chapter ordering
+
+Chapters are **not** manually reorderable or renameable — there is no drag-and-drop and no inline rename (both were removed). `get_project_chapters` re-derives every chapter's `sort_order` from its folder name on each read (`recompute_sort_order` in `projects.rs`, using `natural_sort_key`), so the list always reflects on-disk folder names in natural order. The `display_name` is the raw folder name; the `chapterNumber` shown as "Chapter N" is parsed from it at read time by `extract_chapter_number` (`utils.rs`) and rendered above the folder name, falling back to just the folder name when no number can be extracted.
+
 ## Image sorting
 
-Images within each chapter folder are sorted with a natural sort algorithm (1, 2, 10 — not 1, 10, 2). Implemented in `commands/images.rs:natural_sort_key`.
+Images within each chapter folder are sorted with a natural sort algorithm (1, 2, 10 — not 1, 10, 2). Implemented in `utils.rs:natural_sort_key` (shared with chapter ordering).
 
 ## Platform target — Windows only
 
