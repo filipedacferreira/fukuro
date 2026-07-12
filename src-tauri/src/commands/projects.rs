@@ -232,6 +232,57 @@ pub fn rename_project(
     Ok(())
 }
 
+// Permanently deletes a single chapter: removes its folder (and every page inside) from
+// disk, then its cached thumbnails and DB row. A DB-only delete would just be re-inserted
+// by the next rescan/watch event since the folder would still exist under the watched
+// library root — so this mirrors `delete_project`'s disk-first permanent-delete contract
+// one level down.
+//
+// If the folder can't be removed (e.g. a page is open elsewhere), the error is returned and
+// the DB row is left untouched, so the chapter doesn't vanish from the list while its files
+// are still on disk.
+#[tauri::command]
+pub fn delete_chapter(
+    chapter_id: String,
+    state: tauri::State<DbState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+
+    // Read the folder to remove. (project_id isn't needed here — `invalidate_export`
+    // resolves it from the chapter row itself, which must still exist when it runs.)
+    let folder_path: String = conn
+        .query_row(
+            "SELECT folder_path FROM chapters WHERE id = ?1",
+            params![chapter_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Disk first — if this fails, bail before touching the DB so the list stays truthful.
+    std::fs::remove_dir_all(&folder_path).map_err(|e| e.to_string())?;
+
+    // Drop this chapter's cached thumbnail directory (mirrors the per-chapter cleanup in
+    // `cleanup_project_assets`), so AppData doesn't retain thumbnails for a gone chapter.
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        let thumb_dir = data_dir.join("thumbnails").join(&chapter_id);
+        let _ = std::fs::remove_dir_all(thumb_dir); // ignore error if already gone
+    }
+
+    // Deleting a chapter changes what any CBZ would contain, so both cached-export
+    // timestamps must be nulled — same reasoning as excluding/deleting a page. Run this
+    // BEFORE the DELETE below, while the chapter row still exists for the subquery to find.
+    crate::commands::images::invalidate_export(&conn, &chapter_id)?;
+
+    // ON DELETE CASCADE removes this chapter's excluded_images rows too. No
+    // recompute_sort_order needed — `get_project_chapters` re-derives sort_order from folder
+    // names on every read, so the remaining chapters' now-gapped orders are harmless.
+    conn.execute("DELETE FROM chapters WHERE id = ?1", params![chapter_id])
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 // Deletes a project's cached cover image, per-chapter thumbnail cache directories, and Kobo
 // sync cache file. Called before a project's DB row is removed — whether by an explicit
 // `delete_project`, by `remove_missing_projects` noticing its folder vanished, or by

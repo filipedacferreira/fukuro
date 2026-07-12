@@ -15,7 +15,11 @@ use crate::utils::{is_image_file, natural_sort_key, normalize_path};
 // invalidates both equally. This is what makes the project-row status marker show
 // "outdated" and, more importantly, what makes `sync_project` (kobo.rs) re-export before
 // copying instead of re-uploading a now-stale cached file.
-fn invalidate_export(conn: &Connection, chapter_id: &str) -> Result<(), String> {
+//
+// `pub(crate)` so `projects::delete_chapter` can reuse it — removing a whole chapter
+// changes CBZ contents exactly like excluding/deleting a single page does, so both paths
+// must null the two cached-export timestamps rather than duplicating the SQL.
+pub(crate) fn invalidate_export(conn: &Connection, chapter_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE projects SET last_exported_at = NULL, last_kobo_export_at = NULL
          WHERE id = (SELECT project_id FROM chapters WHERE id = ?1)",

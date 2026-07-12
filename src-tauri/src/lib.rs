@@ -128,6 +128,7 @@ pub fn run() {
             commands::projects::list_projects,
             commands::projects::delete_project,
             commands::projects::rename_project,
+            commands::projects::delete_chapter,
             commands::projects::get_project_chapters,
             commands::images::get_chapter_images,
             commands::thumbnails::generate_chapter_thumbnails_stream,
