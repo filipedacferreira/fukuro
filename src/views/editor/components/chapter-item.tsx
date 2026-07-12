@@ -9,12 +9,14 @@ interface ChapterItemProps {
   chapter: Chapter
   onExclusionChange: (delta: number) => void
   onImageDeleted: () => void
+  onChapterDeleted: () => void
 }
 
 export const ChapterItem: FC<ChapterItemProps> = ({
   chapter,
   onExclusionChange,
   onImageDeleted,
+  onChapterDeleted,
 }) => {
   const itemRef = useRef<HTMLDivElement>(null)
 
@@ -32,10 +34,12 @@ export const ChapterItem: FC<ChapterItemProps> = ({
         className="overflow-hidden rounded-xl border border-border bg-background"
       >
         <ChapterRow
+          chapterId={chapter.id}
           displayName={chapter.displayName}
           chapterNumber={chapter.chapterNumber}
           imageCount={chapter.imageCount}
           excludedCount={chapter.excludedCount}
+          onDeleted={onChapterDeleted}
         />
 
         <Disclosure.Content>

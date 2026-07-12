@@ -25,6 +25,9 @@ export const api = {
   renameProject: (id: string, name: string) =>
     invoke<void>('rename_project', { id, name }),
 
+  deleteChapter: (chapterId: string) =>
+    invoke<void>('delete_chapter', { chapterId }),
+
   getProjectChapters: (projectId: string) =>
     invoke<Chapter[]>('get_project_chapters', { projectId }),
 

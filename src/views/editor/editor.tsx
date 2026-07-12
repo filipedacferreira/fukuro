@@ -78,6 +78,12 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
     )
   }
 
+  // Optimistic removal after delete_chapter resolves — the library watcher's
+  // `chapters-updated` refetch is an idempotent backstop (the DB row is already gone).
+  const handleChapterDeleted = (chapterId: string) => {
+    setChapters((prev) => prev.filter((c) => c.id !== chapterId))
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-border border-b px-4 py-3">
@@ -129,6 +135,7 @@ export const Editor: FC<EditorProps> = ({ project, onBack }) => {
               chapters={chapters}
               onExclusionChange={handleExclusionChange}
               onImageDeleted={handleImageDeleted}
+              onChapterDeleted={handleChapterDeleted}
             />
           )}
         </motion.div>

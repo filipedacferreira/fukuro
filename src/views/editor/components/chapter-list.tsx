@@ -6,12 +6,14 @@ interface ChapterListProps {
   chapters: Chapter[]
   onExclusionChange: (chapterId: string, delta: number) => void
   onImageDeleted: (chapterId: string) => void
+  onChapterDeleted: (chapterId: string) => void
 }
 
 export const ChapterList: FC<ChapterListProps> = ({
   chapters,
   onExclusionChange,
   onImageDeleted,
+  onChapterDeleted,
 }) => {
   if (chapters.length === 0) {
     return (
@@ -29,6 +31,7 @@ export const ChapterList: FC<ChapterListProps> = ({
           chapter={chapter}
           onExclusionChange={(delta) => onExclusionChange(chapter.id, delta)}
           onImageDeleted={() => onImageDeleted(chapter.id)}
+          onChapterDeleted={() => onChapterDeleted(chapter.id)}
         />
       ))}
     </div>
