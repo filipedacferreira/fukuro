@@ -52,7 +52,7 @@ src/
       components/
         chapter-list.tsx          # Renders the auto-sorted chapter list (empty-state fallback)
         chapter-item.tsx          # Disclosure wrapper + scroll-into-view on expand; composes ChapterRow + ImageGrid
-        chapter-row.tsx           # Chapter header row: derived "Chapter N" label + folder name, image/excluded count
+        chapter-row.tsx           # Chapter header row: derived "Chapter N" label + folder name, image/excluded count, hover-reveal delete-chapter button + confirm Dialog
         image-grid.tsx            # Thumbnail grid with exclusion toggle + streaming optimiser
         image-card.tsx            # Single image card with exclude toggle + delete dialog
         export-panel.tsx          # Save dialog + Export CBZ button + Send to device button
@@ -113,6 +113,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `list_projects()` | Rescans the library root (new manga subfolders inserted, missing ones removed) and returns projects ordered by `created_at DESC`; returns `[]` if no library root is configured. Also clears `last_export_path`/`last_exported_at` for any project whose exported file has been deleted externally (`clear_stale_export_paths`) |
 | `delete_project(id)` | **Permanently deletes the manga's folder from disk** (`fs::remove_dir_all`), then cascade-deletes its DB row (chapters + exclusions) and cleans up its cached cover/thumbnails. If the folder can't be removed (e.g. a file inside is open elsewhere), the error is returned and the DB row is left untouched |
 | `rename_project(id, name)` | Update project display name (does not rename the folder on disk) |
+| `delete_chapter(chapterId)` | **Permanently deletes the chapter's folder from disk** (`fs::remove_dir_all`), then its cached thumbnail dir and DB row (cascade-deletes its exclusions), and calls `invalidate_export` since removing a chapter changes CBZ contents. Disk-first like `delete_project`: if the folder can't be removed, the error is returned and the DB row is left untouched. No `recompute_sort_order` needed — `get_project_chapters` re-derives `sort_order` on every read |
 | `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, deletes chapters whose folder no longer exists, and re-derives every `sort_order` from the folder name via `recompute_sort_order` (natural sort) so the list always reads in order. `chapterNumber` is derived from the folder name at read time (`extract_chapter_number`), not stored |
 | `get_chapter_images(chapterId)` | FS read + natural sort, with `isExcluded` and `thumbnailPath` |
 | `toggle_exclusion(chapterId, imagePath)` | Insert/delete from `excluded_images`, returns new state |
@@ -196,7 +197,7 @@ Synced files go to `{drive}\fukuro\{project_name}.cbz` on the device — a dedic
 
 **Invalidating a stale cache**
 
-Excluding/including a page (`toggle_exclusion`) or permanently deleting one (`hard_delete_image`) changes what either cached `.cbz` would actually contain, so both call `invalidate_export` (images.rs) to null out the owning project's `last_exported_at` **and** `last_kobo_export_at` together — one action, two independent caches invalidated. `sync_project` (kobo.rs) treats a null `last_kobo_export_at` the same as a missing cache file — re-running `write_cbz_archive` before copying — rather than silently re-uploading a `.cbz` that no longer matches the chapter's current content.
+Excluding/including a page (`toggle_exclusion`), permanently deleting one (`hard_delete_image`), or deleting a whole chapter (`delete_chapter`, projects.rs) changes what either cached `.cbz` would actually contain, so all three call `invalidate_export` (`pub(crate)` in images.rs) to null out the owning project's `last_exported_at` **and** `last_kobo_export_at` together — one action, two independent caches invalidated. `sync_project` (kobo.rs) treats a null `last_kobo_export_at` the same as a missing cache file — re-running `write_cbz_archive` before copying — rather than silently re-uploading a `.cbz` that no longer matches the chapter's current content.
 
 **Sync flow**
 
