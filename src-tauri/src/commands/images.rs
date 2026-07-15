@@ -29,6 +29,26 @@ pub(crate) fn invalidate_export(conn: &Connection, chapter_id: &str) -> Result<(
     Ok(())
 }
 
+// Project-level counterpart to `invalidate_export`, for callers that already know the project
+// id and are reacting to its chapter *set* changing rather than to a single page. Adding a new
+// chapter folder (or a chapter folder disappearing on disk) changes what any CBZ would contain
+// exactly like excluding/deleting a page does — so the two cached-export timestamps must be
+// nulled the same way. Without this, a freshly-downloaded chapter left the project reading as
+// "up to date" for Kobo sync even though the device copy no longer matches disk. Kept as a
+// separate statement from `invalidate_export` (which resolves the project via a chapter
+// subquery) rather than delegating, since here we already hold the project id directly.
+pub(crate) fn invalidate_export_by_project(
+    conn: &Connection,
+    project_id: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE projects SET last_exported_at = NULL, last_kobo_export_at = NULL WHERE id = ?1",
+        params![project_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // Returned by get_chapter_images for each image file found in a chapter folder.
 // Both `path` and `thumbnail_path` are absolute filesystem paths.
 // `thumbnail_path` equals `path` when no cached thumbnail exists yet (original used as fallback).

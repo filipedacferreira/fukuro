@@ -111,7 +111,18 @@ pub fn start_library_watcher(app: &AppHandle) -> Result<(), String> {
                 let removed = remove_missing_chapters(&conn, project_id).unwrap_or(false);
                 if inserted || removed {
                     let _ = recompute_sort_order(&conn, project_id);
+                    // The chapter set changed, so any cached CBZ is stale — invalidate the
+                    // project's export timestamps so Kobo sync re-exports and the pill flips
+                    // to out-of-sync live, without waiting for the editor to be opened.
+                    let _ = crate::commands::images::invalidate_export_by_project(&conn, project_id);
                     let _ = app_for_handler.emit("chapters-updated", project_id);
+                    // The editor listens to `chapters-updated`, but the project list (and its
+                    // Kobo pill) only listens to `projects-updated` — so re-emit the fresh
+                    // project list too, otherwise the just-invalidated Kobo status wouldn't
+                    // show as out-of-sync until the list is re-fetched some other way.
+                    if let Ok(projects) = query_all_projects(&conn) {
+                        let _ = app_for_handler.emit("projects-updated", projects);
+                    }
                 }
             }
 

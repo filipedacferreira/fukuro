@@ -165,6 +165,33 @@ pub fn list_projects(
     remove_missing_projects(&conn, &app_handle)?;
     clear_stale_export_paths(&conn)?;
 
+    // Reconcile every project's chapters against disk too, not just the project level above.
+    // The library watcher catches chapter folders added/removed while the app is running, but
+    // a chapter downloaded while the app was closed would otherwise go unnoticed until the user
+    // opened that project's editor (`get_project_chapters`). Doing it here means simply opening
+    // the app is enough to notice it — and, crucially, to invalidate the affected project's
+    // cached exports so the Kobo pill reports it as out-of-sync. Each project is one cheap
+    // read_dir; the reconciliation helpers dedupe against the DB and no-op when nothing changed.
+    let project_roots: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, root_path FROM projects")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+    for (project_id, root_path) in &project_roots {
+        let inserted = insert_new_chapters(&conn, project_id, root_path)?;
+        let removed = remove_missing_chapters(&conn, project_id)?;
+        if inserted || removed {
+            recompute_sort_order(&conn, project_id)?;
+            crate::commands::images::invalidate_export_by_project(&conn, project_id)?;
+        }
+    }
+
     let projects = query_all_projects(&conn)?;
     drop(conn); // release the lock before spawning lookups, which will re-acquire it later
 
@@ -623,6 +650,9 @@ pub fn get_project_chapters(
     let removed = remove_missing_chapters(&conn, &project_id)?;
     if inserted || removed {
         recompute_sort_order(&conn, &project_id)?;
+        // A chapter appeared/disappeared on disk since we last looked, so any cached CBZ
+        // (the user's export and Kobo sync's own copy) no longer matches — mark both stale.
+        crate::commands::images::invalidate_export_by_project(&conn, &project_id)?;
     }
 
     // Query all chapters (including any just inserted) in sort order.
