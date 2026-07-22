@@ -14,9 +14,15 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Tauri plugins: file opener (open URLs, paths) and native file dialogs.
+        // Tauri plugins: file opener (open URLs, paths), native file dialogs, the
+        // GitHub-Releases auto-updater, and process control (relaunch after an update
+        // installs). Both the check and the install are driven entirely from the frontend
+        // (see use-app-update.ts) via each plugin's JS API — no Rust commands needed here,
+        // same as how plugin-dialog is only ever called from JS.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Resolve the platform-specific app data directory:
             // macOS → ~/Library/Application Support/io.fukuro/
