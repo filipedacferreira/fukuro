@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { AppUpdateDialog } from '@/components/app-update-dialog'
 import { Toaster } from '@/components/ui/toaster'
 import type { Project } from '@/types'
 import { Editor } from '@/views/editor/editor'
@@ -22,6 +23,7 @@ export default function App() {
         />
       )}
       <Toaster />
+      <AppUpdateDialog />
     </div>
   )
 }
