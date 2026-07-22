@@ -5,7 +5,9 @@ mod utils;
 use db::DbState;
 use std::sync::Mutex;
 use tauri::Manager;
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 
 // #[cfg_attr(mobile, ...)] is a conditional attribute: it applies the inner attribute
 // only when compiling for a mobile target (iOS/Android). On desktop builds this line
@@ -70,13 +72,25 @@ pub fn run() {
             app.manage(commands::kobo::KoboDeviceState(Mutex::new(None)));
             commands::kobo::start_kobo_watcher(&app.handle());
 
+            // Populates the About dialog with the running build's actual name/version — read
+            // from `app.package_info()`, which reflects tauri.conf.json's `version` field
+            // (patched per-tag by release.yml) rather than the `Cargo.toml` version, which
+            // stays fixed at "0.1.0" for local dev builds. Without explicit metadata here,
+            // muda's Windows implementation treats About as a silent no-op (see
+            // `PredefinedMenuItemType::About(None)` in its Windows menu-event match) — there'd
+            // be no in-app way to tell which version is actually running.
+            let about_metadata = AboutMetadataBuilder::new()
+                .name(Some(app.package_info().name.clone()))
+                .version(Some(app.package_info().version.to_string()))
+                .build();
+
             // Build the native OS menu bar.
             let menu = MenuBuilder::new(app)
                 .item(
                     &SubmenuBuilder::new(app, "Fukurō")
                         // PredefinedMenuItem handles platform-specific behaviour automatically
                         // (e.g. About on macOS shows the system About panel).
-                        .item(&PredefinedMenuItem::about(app, None, None)?)
+                        .item(&PredefinedMenuItem::about(app, None, Some(about_metadata))?)
                         .separator()
                         .item(&PredefinedMenuItem::quit(app, None)?)
                         .build()?,

@@ -247,7 +247,7 @@ Configured in `lib.rs` via `tauri::menu`. Current items:
 
 | Menu | Item | Action |
 |---|---|---|
-| Fukurō | About, Quit | standard |
+| Fukurō | About, Quit | About shows a native message box with the running build's name/version, via explicit `AboutMetadata` built from `app.package_info()`; on Windows, `PredefinedMenuItem::about` with no metadata is a silent no-op, not a default dialog. Quit is standard |
 | Edit | Undo, Redo, Cut, Copy, Paste, Select All | standard (predefined) |
 | Tools | Clear Thumbnail Cache | deletes `{AppData}/thumbnails/` silently |
 
