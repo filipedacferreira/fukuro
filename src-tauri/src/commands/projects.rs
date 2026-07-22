@@ -53,7 +53,8 @@ pub struct Chapter {
 }
 
 // Counts how many image files are directly inside a directory (not recursive).
-// Used when inserting a new chapter — the count is cached in the DB.
+// Used both when inserting a new chapter and by recompute_image_counts to refresh
+// existing chapters' cached counts against what's actually on disk.
 fn count_images_in_dir(dir: &Path) -> i64 {
     std::fs::read_dir(dir)
         .map(|entries| {
@@ -627,6 +628,44 @@ pub(crate) fn recompute_sort_order(conn: &rusqlite::Connection, project_id: &str
     Ok(())
 }
 
+// Re-counts every chapter's image files from disk and writes any changed count back to
+// image_count. Unlike insert_new_chapters/remove_missing_chapters (which only fire when a
+// chapter folder itself appears/disappears), this catches pages arriving into or vanishing
+// from an *existing* chapter's folder after it was first discovered — e.g. a scanlation
+// downloader that creates the chapter folder before it finishes writing pages into it, which
+// would otherwise leave image_count permanently stuck at whatever was on disk the moment the
+// chapter was first scanned. Called unconditionally by get_project_chapters, mirroring how
+// recompute_sort_order and extract_chapter_number are re-derived on every read rather than
+// trusted from a cache.
+fn recompute_image_counts(conn: &rusqlite::Connection, project_id: &str) -> Result<(), String> {
+    let chapters: Vec<(String, String, i64)> = {
+        let mut stmt = conn
+            .prepare("SELECT id, folder_path, image_count FROM chapters WHERE project_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let result: Vec<(String, String, i64)> = stmt
+            .query_map(params![project_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        result
+    };
+
+    for (id, folder_path, cached_count) in chapters {
+        let current_count = count_images_in_dir(Path::new(&folder_path));
+        if current_count != cached_count {
+            conn.execute(
+                "UPDATE chapters SET image_count = ?1 WHERE id = ?2",
+                params![current_count, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 // Returns all chapters for a project, ordered by sort_order.
 // Also rescans the project's root folder: new subdirectories are inserted as chapters,
 // and chapters whose folder was deleted on disk are removed from the DB.
@@ -654,6 +693,9 @@ pub fn get_project_chapters(
         // (the user's export and Kobo sync's own copy) no longer matches — mark both stale.
         crate::commands::images::invalidate_export_by_project(&conn, &project_id)?;
     }
+    // Independent of whether chapters were added/removed: an existing chapter's own page
+    // count may have drifted from its cached image_count (see recompute_image_counts).
+    recompute_image_counts(&conn, &project_id)?;
 
     // Query all chapters (including any just inserted) in sort order.
     // The subquery counts excluded images inline so the frontend gets the badge count

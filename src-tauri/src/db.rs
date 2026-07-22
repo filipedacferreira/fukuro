@@ -89,7 +89,10 @@ pub fn initialize(conn: &Connection) -> Result<()> {
              folder_path TEXT NOT NULL,   -- absolute path to the chapter subfolder
              display_name TEXT NOT NULL,  -- editable label shown in the UI
              sort_order INTEGER NOT NULL, -- 0-based; drives chapter order in the CBZ
-             image_count INTEGER NOT NULL DEFAULT 0 -- cached at scan time
+             image_count INTEGER NOT NULL DEFAULT 0 -- re-derived from disk on every
+                                                     -- get_project_chapters call (see
+                                                     -- recompute_image_counts), not a
+                                                     -- write-once cache
          );
 
          -- Soft-delete table: marking an image excluded doesn't touch the file.
