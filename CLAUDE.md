@@ -21,6 +21,7 @@ Desktop utility for batching manga chapters into `.cbz` files. Built with Tauri 
 | Title similarity | `strsim` (Jaro-Winkler) |
 | Title cleanup | `regex` |
 | Kobo device info | `windows` crate (raw Win32: `GetVolumeInformationW`, `GetDiskFreeSpaceExW`) |
+| Auto-update | `tauri-plugin-updater` + `tauri-plugin-process`, signed GitHub Releases as the update source |
 
 ## Project structure
 
@@ -38,6 +39,7 @@ src/
   hooks/
     use-kobo-device.ts             # Tracks the connected Kobo device: get_kobo_device seed + kobo-device-changed listener
     use-kobo-sync.ts               # Drives one project's "Send to device" flow; shared by ProjectRow's menu item and ExportPanel
+    use-app-update.ts              # Startup GitHub-Releases update check + download/install state machine (see Auto-update below)
     use-element-transition.ts     # Foundations hook (copied from foundations.significa.co)
     use-top-layer.ts              # Foundations hook (copied from foundations.significa.co)
   views/
@@ -62,6 +64,7 @@ src/
       field.tsx input.tsx modal.tsx progress.tsx skeleton.tsx spinner.tsx toaster.tsx tooltip.tsx
     cover-dialog.tsx              # Shared cover dialog; accepts projectId + cover: CoverInfo + onCoverChange: (CoverInfo) => void
     cover-thumbnail.tsx           # Shared cover button (sm/lg sizes); used in editor header + project cards
+    app-update-dialog.tsx         # Fully-controlled dialog driven by useAppUpdate's state machine; mounted once in app.tsx
   utils/                          # Foundations utils (copied from foundations.significa.co)
     compose-refs.ts
     next-frame.ts
@@ -215,6 +218,28 @@ A chapter *appearing or disappearing on disk* invalidates the same two timestamp
 - Per-project sync *also* lives in `ProjectRow`'s `⋯` dropdown menu as a plain **Send to device** item, and `ExportPanel` (editor) has its own **Send to device** button alongside **Export CBZ** — all three entry points (drawer row, row menu, export panel) drive the shared `useKoboSync` hook. Project rows carry no standalone status marker; the drawer is the source of truth.
 
 **A gotcha worth knowing:** `SyncEvent`/`SyncAllEvent`/`ExportEvent`/`BackfillEvent` all need **both** `rename_all = "camelCase"` (renames the `type` tag) **and** `rename_all_fields = "camelCase"` (renames the fields inside each variant) — one without the other silently ships snake_case field names with no error anywhere. See `docs/rust-primer.md`'s "Tagged enums" entry for the full story.
+
+## Auto-update
+
+Checks GitHub Releases for a newer published version on every app startup and offers to download and install it in place, using `tauri-plugin-updater` + `tauri-plugin-process`. Entirely frontend-driven — no Rust commands were added; `use-app-update.ts` calls each plugin's JS API directly (`check`, `Update.download`, `Update.install`, `relaunch`), the same way `plugin-dialog` is only ever called from JS. `lib.rs` just registers both plugins (`.plugin(tauri_plugin_updater::Builder::new().build())`, `.plugin(tauri_plugin_process::init())`); their permissions (`updater:default`, `process:allow-restart`) live in `capabilities/default.json`.
+
+**Release pipeline**
+
+- Releases continue to be published as **drafts** by `release.yml` — the manual publish step on GitHub is the real gate; the updater endpoint (`.../releases/latest/download/latest.json`) only ever resolves to the latest *published*, non-prerelease release, so nothing auto-publishes.
+- `bundle.targets` is `["nsis"]` only (narrowed from `"all"`) — the updater plugin needs one predictable Windows artifact to sign and serve, and NSIS supports the quiet/passive silent-install modes the updater relies on; MSI's silent-update path is clunkier. `.msi` is no longer produced.
+- `bundle.createUpdaterArtifacts: true` in `tauri.conf.json` tells the build to produce the signed update artifact/signature whenever the signing env vars are present. `tauri-action` in `release.yml` (via `includeUpdaterJson: true`) aggregates those into `latest.json` on the GitHub release — no separate signing step to maintain.
+- The signing keypair (`tauri signer generate`) and its two GitHub Actions secrets (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) are generated and set by hand, outside any assistant session — the private key never needs to touch the repo or an editor. Only the public key goes into `tauri.conf.json`'s `plugins.updater.pubkey`.
+- Single stable channel only — no beta/prerelease opt-in.
+
+**Check & install flow**
+
+- Checked once, on app startup only (`useAppUpdate`'s mount effect) — no periodic in-session polling, no manual "Check for updates" menu item.
+- If the check itself fails (offline, GitHub unreachable, rate-limited): silent no-op, since this is a passive background check the user didn't trigger. Any failure *after* the user accepts the prompt (download or install) surfaces in the dialog instead, since they've now taken an explicit action.
+- `AppUpdateDialog` (mounted once in `app.tsx`, alongside `Toaster`) is a single `Dialog` fully controlled by `useAppUpdate`'s state machine (`idle` → `available` → `downloading` → `ready` → `installing`, or `error` at any point past `available`) — no `Dialog.Trigger`, since nothing the user clicks opens it.
+- `available`: prompts **Download & install** vs **Not now**, before any bytes are fetched.
+- `downloading`: shows byte progress via the plugin's `Started`/`Progress` events; the dialog can't be dismissed mid-download (mirrors `KoboSyncDrawer`'s guard against closing mid-batch — closing here would abandon the in-flight download).
+- `ready`: prompts **Restart now** (installs then `relaunch()`s) vs **Restart later**. "Restart later" discards the in-memory `Update` handle entirely rather than trying to persist it across a process exit — the next launch's startup check simply finds the same release again and the whole prompt/download/restart flow repeats from scratch.
+- `installing` can't be dismissed either, for the same reason as `downloading`.
 
 ## Native menu
 
