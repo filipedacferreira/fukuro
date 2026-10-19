@@ -80,7 +80,12 @@ pub fn ensure_thumbnail(source: &Path, dest: &Path) -> Result<(), String> {
     }
 
     // Decode the source image into an in-memory pixel buffer.
+    // `open` alone picks the decoder from the file extension; `with_guessed_format`
+    // overrides that by sniffing the file's leading magic bytes, since some downloaders
+    // save JPEG data under a `.png` name and the PNG decoder would reject it.
     let img = image::ImageReader::open(source)
+        .map_err(|e| e.to_string())?
+        .with_guessed_format()
         .map_err(|e| e.to_string())?
         .decode()
         .map_err(|e| e.to_string())?;
@@ -179,4 +184,32 @@ pub fn clear_thumbnail_cache(app_handle: tauri::AppHandle) -> Result<(), String>
         std::fs::remove_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Some scanlation downloaders save JPEG bytes under a `.png` name. The thumbnailer
+    // must decode by content, not trust the extension, or those pages never get a thumbnail.
+    #[test]
+    fn ensure_thumbnail_decodes_jpeg_with_png_extension() {
+        // A fresh scratch dir under the OS temp dir, unique per test run.
+        let dir = std::env::temp_dir().join(format!("fukuro-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("01.png");
+        let dest = dir.join("thumb").join("01.jpg");
+
+        // Encode a small solid-grey JPEG in memory and write it with the misleading extension.
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode(&[128u8; 16 * 16 * 3], 16, 16, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        std::fs::write(&source, &jpeg).unwrap();
+
+        let result = ensure_thumbnail(&source, &dest);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(result, Ok(()));
+    }
 }
