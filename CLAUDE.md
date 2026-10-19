@@ -266,7 +266,7 @@ All Rust source files must have descriptive inline comments, even for constructs
 
 ## Feature planning — PRIORITY
 
-Before implementing any new feature (not bug fixes, not refactors — new user-facing or backend functionality), always run the `grilling` skill (relentless interview to sharpen the plan/design) first, even if the user did not invoke it via `/grill-me` or `/grilling`. This applies regardless of how the feature request was phrased — treat it as a mandatory gate, not an optional offer.
+Before implementing any new feature (not bug fixes, not refactors — new user-facing or backend functionality), always run a grill-with-docs session first: load both the `grilling` skill (relentless interview to sharpen the plan/design) and the `domain-modeling` skill (records resolved terms in `GLOSSARY.md` and hard-to-reverse decisions as ADRs in `docs/adr/` as the interview goes), even if the user did not invoke `/grill-with-docs`, `/grill-me` or `/grilling`. This is exactly what `/grill-with-docs` does; it's user-invocable only, so load the two skills directly. This applies regardless of how the feature request was phrased — treat it as a mandatory gate, not an optional offer.
 
 Do not start writing code for a new feature until the grilling session has reached a shared understanding of the design.
 
