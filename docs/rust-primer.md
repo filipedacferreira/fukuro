@@ -423,6 +423,39 @@ Key points:
 - `JpegEncoder::new_with_quality(&mut buf, 100)` — quality 100 means maximum fidelity
 - Writing to `Vec<u8>` first avoids partial-write corruption if encoding fails mid-way
 
+### Decoding from a file path — don't trust the extension
+
+Chapter thumbnails (`ensure_thumbnail` in `thumbnails.rs`) decode straight from disk with `ImageReader` instead of `load_from_memory`. The catch: `ImageReader::open(path)` picks the decoder **from the file extension only**. Some downloaders save JPEG bytes under a `.png` name, and the PNG decoder then rejects the file outright.
+
+```rust
+let img = image::ImageReader::open(source)   // decoder chosen from ".png"
+    .map_err(|e| e.to_string())?
+    .with_guessed_format()                    // re-pick it from the file's magic bytes
+    .map_err(|e| e.to_string())?
+    .decode()
+    .map_err(|e| e.to_string())?;
+```
+
+`with_guessed_format()` peeks at the first few bytes (`FF D8` = JPEG, `89 50 4E 47` = PNG, `RIFF` = WebP…) and overrides the extension's guess. It returns an `io::Result` because that peek is a file read, hence the extra `?`. `load_from_memory` already does this sniffing, which is why the cover commands never had the problem.
+
+---
+
+## Unit tests — `#[cfg(test)]` and `cargo test`
+
+`thumbnails.rs` ends with a test module:
+
+```rust
+#[cfg(test)]          // only compiled for `cargo test`, never into the app build
+mod tests {
+    use super::*;     // pull in everything from the parent file, private items included
+
+    #[test]           // marks a function as a test; a panic (e.g. failed assert) = failure
+    fn ensure_thumbnail_decodes_jpeg_with_png_extension() { /* ... */ }
+}
+```
+
+Tests live in the same file as the code they test, so they can call private helpers directly. Run them from `src-tauri/` with `cargo test` (or `cargo test --lib ensure_thumbnail` to run only tests whose name contains that text). Fixtures are generated in-test and written under `std::env::temp_dir()`, so nothing depends on files checked into the repo.
+
 ---
 
 ## The `windows` crate — calling Win32 APIs directly
