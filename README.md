@@ -79,7 +79,9 @@ Produces a Windows `.exe` / `.msi`. **Windows is the only supported platform** �
 
 - [`CLAUDE.md`](CLAUDE.md) — architecture overview: project structure, database schema, Rust commands, and how each subsystem (covers, thumbnails, Kobo sync) fits together
 - [`docs/rust-primer.md`](docs/rust-primer.md) — a living reference explaining every non-obvious Rust/Tauri pattern used in the backend, tied to real code in the project
-- [`docs/roadmap.md`](docs/roadmap.md) — planned features, ordered by dependency
+- [`GLOSSARY.md`](GLOSSARY.md) — the domain vocabulary (project, chapter, exclusion, Kobo sync, ...)
+- [`docs/adr/`](docs/adr/) — architecture decision records
+- Planned work lives in [GitHub Issues](https://github.com/filipedacferreira/fukuro/issues)
 
 ## License
 

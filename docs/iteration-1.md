@@ -266,4 +266,4 @@ A thin typed wrapper over `invoke()` from `@tauri-apps/api/core`. Every Rust com
 
 ## What's not built yet
 
-See [`roadmap.md`](./roadmap.md).
+See the [`enhancement` issues](https://github.com/filipedacferreira/fukuro/issues?q=is%3Aissue+label%3Aenhancement) on GitHub.
