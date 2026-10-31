@@ -72,7 +72,7 @@ src/
 src-tauri/src/
   lib.rs                          # Tauri builder: plugin init, DB setup, command registry, native menu
   db.rs                           # DbState type + SQLite schema migration
-  utils.rs                        # Shared helpers: normalize_path, now_unix, is_image_file, natural_sort_key, extract_chapter_number
+  utils.rs                        # Shared helpers: normalize_path, now_unix, is_image_file, natural_sort_key, extract_chapter_number, compare_chapter_names
   commands/
     mod.rs
     settings.rs                   # get_library_root, set_library_root; read_library_root helper
@@ -117,7 +117,7 @@ All commands return `Result<T, String>`. Errors surface as toast notifications i
 | `delete_project(id)` | **Permanently deletes the manga's folder from disk** (`fs::remove_dir_all`), then cascade-deletes its DB row (chapters + exclusions) and cleans up its cached cover/thumbnails. If the folder can't be removed (e.g. a file inside is open elsewhere), the error is returned and the DB row is left untouched |
 | `rename_project(id, name)` | Update project display name (does not rename the folder on disk) |
 | `delete_chapter(chapterId)` | **Permanently deletes the chapter's folder from disk** (`fs::remove_dir_all`), then its cached thumbnail dir and DB row (cascade-deletes its exclusions), and calls `invalidate_export` since removing a chapter changes CBZ contents. Disk-first like `delete_project`: if the folder can't be removed, the error is returned and the DB row is left untouched. No `recompute_sort_order` needed — `get_project_chapters` re-derives `sort_order` on every read |
-| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, deletes chapters whose folder no longer exists, and re-derives every `sort_order` from the folder name via `recompute_sort_order` (natural sort) so the list always reads in order. Also re-derives every chapter's `image_count` from disk via `recompute_image_counts`, unconditionally (not just when chapters are added/removed) — a chapter's own folder can still gain or lose pages after it was first discovered (e.g. a downloader that creates the folder before finishing writing pages into it), which would otherwise leave `image_count` stuck at a stale value. `chapterNumber` is derived from the folder name at read time (`extract_chapter_number`), not stored |
+| `get_project_chapters(projectId)` | Chapters ordered by `sort_order`; rescans disk for new subdirs and inserts them, deletes chapters whose folder no longer exists, and re-derives every `sort_order` from the folder name via `recompute_sort_order` (chapter number first, natural sort as tie-breaker) so the list always reads in order. Also re-derives every chapter's `image_count` from disk via `recompute_image_counts`, unconditionally (not just when chapters are added/removed) — a chapter's own folder can still gain or lose pages after it was first discovered (e.g. a downloader that creates the folder before finishing writing pages into it), which would otherwise leave `image_count` stuck at a stale value. `chapterNumber` is derived from the folder name at read time (`extract_chapter_number`), not stored |
 | `get_chapter_images(chapterId)` | FS read + natural sort, with `isExcluded` and `thumbnailPath` |
 | `toggle_exclusion(chapterId, imagePath)` | Insert/delete from `excluded_images`, returns new state |
 | `hard_delete_image(chapterId, path)` | `fs::remove_file` + thumbnail cache cleanup + DB cleanup |
@@ -377,7 +377,7 @@ Ensures correct display order in all CBZ readers.
 
 ## Chapter ordering
 
-Chapters are **not** manually reorderable or renameable — there is no drag-and-drop and no inline rename (both were removed). `get_project_chapters` re-derives every chapter's `sort_order` from its folder name on each read (`recompute_sort_order` in `projects.rs`, using `natural_sort_key`), so the list always reflects on-disk folder names in natural order. The `display_name` is the raw folder name; the `chapterNumber` shown as "Chapter N" is parsed from it at read time by `extract_chapter_number` (`utils.rs`) and rendered above the folder name, falling back to just the folder name when no number can be extracted.
+Chapters are **not** manually reorderable or renameable — there is no drag-and-drop and no inline rename (both were removed). `get_project_chapters` re-derives every chapter's `sort_order` from its folder name on each read (`recompute_sort_order` in `projects.rs`, using `compare_chapter_names` in `utils.rs`). Chapters are ordered by the number `extract_chapter_number` parses out, *not* by natural-sorting the whole folder name: downloaders only add a `Vol.NN` prefix once a volume is out, so a plain sort put un-volumed recent chapters (`Ch.0026 …`) before `Vol.01 Ch.0001 …`. Ties (the same chapter from two groups) fall back to natural sort, and folders with no number go last. The `display_name` is the raw folder name; the `chapterNumber` shown as "Chapter N" is parsed from it at read time by `extract_chapter_number` (`utils.rs`) and rendered above the folder name, falling back to just the folder name when no number can be extracted.
 
 ## Image sorting
 
