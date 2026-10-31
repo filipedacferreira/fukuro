@@ -193,6 +193,26 @@ Nothing runs until `.collect()` — iterators in Rust are lazy. The type annotat
 
 ---
 
+## Custom sort comparators — `sort_by`, `Ordering`, `total_cmp`, `then_with`
+
+```rust
+// recompute_sort_order in projects.rs
+chapters.sort_by(|(_, a), (_, b)| compare_chapter_names(&basename(a), &basename(b)));
+```
+
+There are two ways to sort a `Vec`:
+
+- **`sort_by_key(|x| key)`** turns each element into a key and sorts by that. It's fine when one value per element is enough, like `natural_sort_key` for image filenames.
+- **`sort_by(|a, b| ordering)`** gets *both* elements and returns a `std::cmp::Ordering` (`Less`, `Equal` or `Greater`). Use it when the rule is "compare by X, and only if that ties, compare by Y".
+
+`compare_chapter_names` (`utils.rs`) is that second case. It compares by chapter number, then by natural sort:
+
+- **`f64::total_cmp`**: floats don't implement `Ord`, because `NaN` isn't less than, equal to or greater than anything, so `a.cmp(&b)` won't compile for `f64`. `total_cmp` is the method that always returns an `Ordering`.
+- **`Ordering::then_with(|| ...)`**: returns `self` unless it's `Equal`, and only then runs the closure. This is how tie-breakers chain. `then(other)` does the same with an already-computed value, but `then_with` skips the work when it isn't needed.
+- **Matching on a tuple of `Option`s**: `match (a_num, b_num) { (Some(x), Some(y)) => ..., (Some(_), None) => Less, ... }` handles all four present/missing combinations in one place, and the compiler errors if one is left out.
+
+---
+
 ## `move` closures — capturing variables into threads
 
 ```rust
