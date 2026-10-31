@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::commands::settings::read_library_root;
 use crate::db::DbState;
-use crate::utils::{extract_chapter_number, is_image_file, natural_sort_key, normalize_path};
+use crate::utils::{compare_chapter_names, extract_chapter_number, is_image_file, normalize_path};
 
 // These structs are returned from commands. `Serialize` lets serde convert them to JSON
 // so Tauri can send them to the frontend. `rename_all = "camelCase"` means `root_path`
@@ -586,8 +586,8 @@ pub(crate) fn remove_missing_chapters(
 }
 
 // Re-derives every chapter's sort_order from its folder name, so the list always reads
-// in natural-sort order (Chapter 2 before Chapter 10) with no manual drag-to-reorder
-// involved. SQLite has no natural-sort collation, so this sorts in Rust and writes the
+// in chapter-number order (Chapter 2 before Chapter 10, and an un-volumed "Ch.26" after
+// "Vol.03 Ch.25" — see compare_chapter_names) with no manual drag-to-reorder involved. SQLite has no natural-sort collation, so this sorts in Rust and writes the
 // resulting rank back to sort_order — called after insert_new_chapters/remove_missing_chapters
 // actually change the chapter set, by both `get_project_chapters` and the watcher in
 // `watch.rs`, so the two never drift out of sync with disk.
@@ -609,13 +609,15 @@ pub(crate) fn recompute_sort_order(conn: &rusqlite::Connection, project_id: &str
     // Sort by the folder's base name (the part after the last '/'), not the full path —
     // every chapter in a project shares the same parent prefix, but comparing basenames
     // directly is clearer about intent than relying on that being true.
-    chapters.sort_by_key(|(_, folder_path)| {
-        let basename = Path::new(folder_path)
+    let basename = |folder_path: &String| {
+        Path::new(folder_path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| folder_path.clone());
-        natural_sort_key(&basename)
-    });
+            .unwrap_or_else(|| folder_path.clone())
+    };
+    // `sort_by` (not `sort_by_key`) since the comparison needs both names at once to
+    // decide between number-first and natural-sort tie-breaking.
+    chapters.sort_by(|(_, a), (_, b)| compare_chapter_names(&basename(a), &basename(b)));
 
     for (i, (id, _)) in chapters.iter().enumerate() {
         conn.execute(

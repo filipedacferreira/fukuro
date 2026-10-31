@@ -95,3 +95,79 @@ pub fn extract_chapter_number(name: &str) -> Option<f64> {
     let bare_number = Regex::new(r"\d+(?:\.\d+)?").expect("valid regex");
     bare_number.find(name)?.as_str().parse().ok()
 }
+
+// Orders two chapter folder names for reading order. Folder names alone can't be
+// natural-sorted: scanlation downloaders prefix chapters with a volume ("Vol.01 Ch.0001")
+// only once that volume has been released, so the newest chapters ("Ch.0026") have no
+// prefix and a plain sort puts them *before* Vol.01 ("C" < "V").
+// Instead compare by the extracted chapter number first, then fall back to natural sort for:
+//   - ties (the same chapter from two scanlation groups, e.g. two "Ch.0037.5" folders),
+//     so the result stays deterministic;
+//   - folders with no number at all ("Extras"), which go after every numbered chapter.
+pub fn compare_chapter_names(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+
+    let by_number = match (extract_chapter_number(a), extract_chapter_number(b)) {
+        // f64 has no total order (NaN), so `Ord`/`cmp` aren't available — `total_cmp`
+        // is the float method that always returns an Ordering. Parsed chapter numbers
+        // are never NaN, so this behaves like ordinary numeric comparison.
+        (Some(x), Some(y)) => x.total_cmp(&y),
+        // Numbered chapters before un-numbered ones.
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    };
+
+    // `then_with` only runs the closure when `by_number` is Equal — i.e. a tie-breaker.
+    by_number.then_with(|| natural_sort_key(a).cmp(&natural_sort_key(b)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sorted(names: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        v.sort_by(|a, b| compare_chapter_names(a, b));
+        v
+    }
+
+    // Newer chapters without a volume prefix must come after the volumed ones, not before.
+    #[test]
+    fn unvolumed_chapters_sort_after_volumed_ones() {
+        let result = sorted(&[
+            "Ch.0026 (en) [Uwaki Scans]",
+            "Vol.03 Ch.0025.5 (en) [Uwaki Scans]",
+            "Vol.01 Ch.0001 (en) [Uwaki Scans]",
+            "Vol.01 Ch.0009.6 - Volume 1 Magazine Bonus Chapter (en) [Uwaki Scans]",
+            "Vol.01 Ch.0009.1 - Volume 1 Extras (en) [Uwaki Scans]",
+            "Vol.02 Ch.0010 (en) [Uwaki Scans]",
+        ]);
+        assert_eq!(
+            result,
+            [
+                "Vol.01 Ch.0001 (en) [Uwaki Scans]",
+                "Vol.01 Ch.0009.1 - Volume 1 Extras (en) [Uwaki Scans]",
+                "Vol.01 Ch.0009.6 - Volume 1 Magazine Bonus Chapter (en) [Uwaki Scans]",
+                "Vol.02 Ch.0010 (en) [Uwaki Scans]",
+                "Vol.03 Ch.0025.5 (en) [Uwaki Scans]",
+                "Ch.0026 (en) [Uwaki Scans]",
+            ]
+        );
+    }
+
+    // Plain numbered folders still sort numerically (2 before 10), and un-numbered ones go last.
+    #[test]
+    fn numbers_compare_numerically_and_unnumbered_go_last() {
+        assert_eq!(sorted(&["Extras", "Chapter 10", "Chapter 2"]), ["Chapter 2", "Chapter 10", "Extras"]);
+    }
+
+    // Two releases of the same chapter tie on number and fall back to natural sort.
+    #[test]
+    fn same_chapter_number_falls_back_to_name() {
+        assert_eq!(
+            sorted(&["Ch.0037.5 (en) [Uwaki Scans]", "Ch.0037.5 (en) [jacktherippertransl]"]),
+            ["Ch.0037.5 (en) [Uwaki Scans]", "Ch.0037.5 (en) [jacktherippertransl]"]
+        );
+    }
+}
