@@ -10,10 +10,10 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import type { FC } from 'react'
+import { KoboSyncProgress } from '@/components/kobo-sync-progress'
 import { Button, IconButton } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
 import { Spinner } from '@/components/ui/spinner'
-import { useKoboSync } from '@/hooks/use-kobo-sync'
+import { type SyncProgress, useKoboSync } from '@/hooks/use-kobo-sync'
 import { formatRelativeTime, getKoboSyncStatus } from '@/lib/kobo'
 import { cn } from '@/lib/utils/classnames'
 import type { Project } from '@/types'
@@ -21,8 +21,10 @@ import type { Project } from '@/types'
 // Transient per-row state during a "Sync all" run, driven by the SyncAllEvent stream in the
 // parent drawer (see kobo-sync-drawer.tsx). Separate from the resting KoboSyncStatus, which is
 // derived purely from the project's timestamps: a row is `queued` the moment a bulk run starts,
-// `syncing` on its `started` event, then `done`/`failed` on its `progress` event. A single-row
-// send (below) doesn't use this — it has its own byte-level `useKoboSync` progress instead.
+// `syncing` on its `started` event, then `done`/`failed` on its `finished` event. While
+// `syncing`, the drawer also passes the live export/copy progress (`bulkProgress`) from the
+// run's `projectProgress` events. A single-row send (below) doesn't use this — it has its own
+// `useKoboSync` progress instead; both render through the same KoboSyncProgress line.
 export type KoboRowRunState = 'queued' | 'syncing' | 'done' | 'failed'
 
 // What the row actually renders: either a live run state or the resting timestamp-derived
@@ -35,6 +37,9 @@ interface KoboSyncRowProps {
   // be sent twice at once (once by the batch, once by hand).
   bulkActive: boolean
   runState?: KoboRowRunState
+  // Live progress of this row while it's the active project of a Sync all run. Undefined for
+  // every other row, and briefly for the active one between `started` and its first progress.
+  bulkProgress?: SyncProgress
   // Called after a successful single-row send: the parent both patches the project's timestamps
   // in its list (so the row settles to "up to date") and clears any lingering `failed` run state.
   onSynced: (projectId: string) => void
@@ -73,6 +78,7 @@ export const KoboSyncRow: FC<KoboSyncRowProps> = ({
   project,
   bulkActive,
   runState,
+  bulkProgress,
   onSynced,
 }) => {
   const { sync, progress, syncing } = useKoboSync(project, () =>
@@ -84,6 +90,12 @@ export const KoboSyncRow: FC<KoboSyncRowProps> = ({
   const display: DisplayState = syncing ? 'syncing' : (runState ?? status)
   const meta = STATUS_META[display]
   const StatusIcon = meta.icon
+  // Same priority for the progress line: own single send first, then the bulk run's.
+  const activeProgress = syncing
+    ? progress
+    : runState === 'syncing'
+      ? bulkProgress
+      : undefined
 
   // The action button's shape depends on how "done" the row is: up-to-date rows get a quiet
   // re-send icon (nothing's wrong, but a re-verify is always allowed — see the drawer's
@@ -111,7 +123,8 @@ export const KoboSyncRow: FC<KoboSyncRowProps> = ({
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium text-sm">{project.name}</p>
         <div className="mt-0.5 flex items-center gap-1.5 text-xs">
-          {display === 'syncing' ? (
+          {/* Spinner only until the first progress event; after that the bar below takes over */}
+          {display === 'syncing' && !activeProgress ? (
             <Spinner size="xs" className="text-accent" />
           ) : (
             <StatusIcon className={cn('size-3.5 shrink-0', meta.className)} />
@@ -127,19 +140,9 @@ export const KoboSyncRow: FC<KoboSyncRowProps> = ({
               </span>
             )}
         </div>
-        {/* Byte/page-level progress for a single-row send only (bulk runs stay coarse) */}
-        {syncing && progress && (
-          <div className="mt-1.5 flex items-center gap-2">
-            <Progress
-              value={progress.current}
-              max={progress.total || 1}
-              size="xs"
-              className="flex-1"
-            />
-            <span className="shrink-0 text-2xs text-foreground-secondary">
-              {progress.phase === 'exporting' ? 'Exporting' : 'Copying'}
-            </span>
-          </div>
+        {/* Live export/copy progress, for a single send and for the active Sync all row alike */}
+        {activeProgress && (
+          <KoboSyncProgress progress={activeProgress} className="mt-1.5" />
         )}
       </div>
 

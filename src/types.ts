@@ -72,10 +72,19 @@ export type SyncEvent =
   | { type: 'done'; devicePath: string }
   | { type: 'error'; message: string }
 
+// Per project: `started` → zero or more `projectProgress` (exporting before copying, same units
+// as SyncEvent: Pages when exporting, bytes when copying) → `finished`. One `done` ends the run.
 export type SyncAllEvent =
   | { type: 'started'; projectId: string }
   | {
-      type: 'progress'
+      type: 'projectProgress'
+      projectId: string
+      phase: 'exporting' | 'copying'
+      current: number
+      total: number
+    }
+  | {
+      type: 'finished'
       current: number
       total: number
       projectId: string

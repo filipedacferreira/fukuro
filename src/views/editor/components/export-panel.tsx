@@ -4,6 +4,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { Archive, Send } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
+import { KoboSyncProgress } from '@/components/kobo-sync-progress'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/components/ui/toaster'
@@ -100,12 +101,12 @@ export const ExportPanel: FC<ExportPanelProps> = ({ project, hasChapters }) => {
             className="max-w-32"
           />
         )}
+        {/* Same progress line as the Kobo drawer: phase, percentage, Pages/bytes */}
         {syncing && syncProgress && (
-          <Progress
-            value={syncProgress.current}
-            max={syncProgress.total || 1}
+          <KoboSyncProgress
+            progress={syncProgress}
             size="sm"
-            className="max-w-32"
+            className="max-w-64"
           />
         )}
       </div>
