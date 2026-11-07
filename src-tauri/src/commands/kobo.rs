@@ -620,12 +620,17 @@ mod tests {
         }
     }
 
+    // Shorthand for the expected `Started` event that opens each project's group of events.
     fn started(id: &str) -> SyncAllEvent {
         SyncAllEvent::Started {
             project_id: id.to_string(),
         }
     }
 
+    // Shorthand for the expected `Finished` event that closes each project's group. `current`
+    // and `total` are whole Projects done so far and in the whole run. `error: None` means the
+    // project succeeded, `Some(msg)` that it failed with that message. The name is derived from
+    // the id exactly as `target` builds it, so the two always line up.
     fn finished(id: &str, current: usize, total: usize, error: Option<&str>) -> SyncAllEvent {
         SyncAllEvent::Finished {
             current,
