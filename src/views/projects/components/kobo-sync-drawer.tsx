@@ -6,10 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Drawer } from '@/components/ui/drawer'
 import { Progress } from '@/components/ui/progress'
 import { toast } from '@/components/ui/toaster'
-import type { SyncProgress } from '@/hooks/use-kobo-sync'
 import { formatBytes, isKoboPending } from '@/lib/kobo'
 import { api } from '@/lib/tauri'
-import type { KoboDevice, Project, SyncAllEvent } from '@/types'
+import type { KoboDevice, Project, SyncAllEvent, SyncProgress } from '@/types'
 import { type KoboRowRunState, KoboSyncRow } from './kobo-sync-row'
 
 // How far the active project has got, as 0..1. When it exported during this run, exporting

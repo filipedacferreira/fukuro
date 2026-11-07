@@ -13,10 +13,10 @@ import type { FC } from 'react'
 import { KoboSyncProgress } from '@/components/kobo-sync-progress'
 import { Button, IconButton } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { type SyncProgress, useKoboSync } from '@/hooks/use-kobo-sync'
+import { useKoboSync } from '@/hooks/use-kobo-sync'
 import { formatRelativeTime, getKoboSyncStatus } from '@/lib/kobo'
 import { cn } from '@/lib/utils/classnames'
-import type { Project } from '@/types'
+import type { Project, SyncProgress } from '@/types'
 
 // Transient per-row state during a "Sync all" run, driven by the SyncAllEvent stream in the
 // parent drawer (see kobo-sync-drawer.tsx). Separate from the resting KoboSyncStatus, which is

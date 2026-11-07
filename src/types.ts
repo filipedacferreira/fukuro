@@ -72,17 +72,24 @@ export type SyncEvent =
   | { type: 'done'; devicePath: string }
   | { type: 'error'; message: string }
 
-// Per project: `started` → zero or more `projectProgress` (exporting before copying, same units
-// as SyncEvent: Pages when exporting, bytes when copying) → `finished`. One `done` ends the run.
+// Which half of a Kobo send is running. Mirrors kobo.rs's unit-only `SyncPhase` enum, which
+// serializes as a plain string (see docs/rust-primer.md's "Tagged enums" entry).
+export type SyncPhase = 'exporting' | 'copying'
+
+// Live progress of one project's Kobo send, for a single send (useKoboSync, from SyncEvent) and
+// for the active project of a Sync all (from SyncAllEvent's `projectProgress`) alike. Units
+// depend on the phase: Pages when exporting, bytes when copying.
+export interface SyncProgress {
+  phase: SyncPhase
+  current: number
+  total: number
+}
+
+// Per project: `started` → zero or more `projectProgress` (exporting before copying) →
+// `finished`. One `done` ends the run.
 export type SyncAllEvent =
   | { type: 'started'; projectId: string }
-  | {
-      type: 'projectProgress'
-      projectId: string
-      phase: 'exporting' | 'copying'
-      current: number
-      total: number
-    }
+  | ({ type: 'projectProgress'; projectId: string } & SyncProgress)
   | {
       type: 'finished'
       current: number

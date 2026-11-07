@@ -2,13 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { useState } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
-import type { Project, SyncEvent } from '@/types'
-
-export interface SyncProgress {
-  phase: 'exporting' | 'copying'
-  current: number
-  total: number
-}
+import type { Project, SyncEvent, SyncProgress } from '@/types'
 
 type ProjectSyncFields = Pick<Project, 'lastKoboExportAt' | 'lastSyncedAt'>
 

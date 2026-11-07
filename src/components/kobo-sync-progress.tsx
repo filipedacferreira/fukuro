@@ -1,8 +1,8 @@
 import type { FC } from 'react'
 import { Progress } from '@/components/ui/progress'
-import type { SyncProgress } from '@/hooks/use-kobo-sync'
 import { formatBytes } from '@/lib/kobo'
 import { cn } from '@/lib/utils/classnames'
+import type { SyncProgress } from '@/types'
 
 interface KoboSyncProgressProps {
   progress: SyncProgress
@@ -13,7 +13,11 @@ interface KoboSyncProgressProps {
 // The detail text next to the phase label: "42% · 120 MB of 284 MB" when copying (bytes) or
 // "42% · 12 of 30 pages" when exporting (Pages). Empty until the first real event reports a
 // total — useKoboSync seeds `{ total: 0 }` before the backend has said anything.
-const describe = ({ phase, current, total }: SyncProgress): string | null => {
+const formatProgressDetail = ({
+  phase,
+  current,
+  total,
+}: SyncProgress): string | null => {
   if (total <= 0) return null
   const percent = Math.floor((Math.min(current, total) / total) * 100)
   const amount =
@@ -32,7 +36,7 @@ export const KoboSyncProgress: FC<KoboSyncProgressProps> = ({
   size = 'xs',
   className,
 }) => {
-  const detail = describe(progress)
+  const detail = formatProgressDetail(progress)
 
   return (
     <div className={cn('flex flex-col gap-1', className)}>
