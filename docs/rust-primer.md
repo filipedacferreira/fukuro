@@ -539,6 +539,31 @@ fn copy_with_progress(
 
 ---
 
+## Closures as dependencies — an event sink and a sync operation
+
+`sync_all_to_kobo` (kobo.rs) used to loop over its targets inline, calling `sync_project` and `on_event.send(...)` directly. Both need a real Tauri app (a DB, a mounted Kobo, an IPC Channel), so the loop couldn't be tested. The loop now lives in `run_sync_all`, which takes those two dependencies as closures instead:
+
+```rust
+fn run_sync_all<S, E>(targets: &[SyncTarget], mut sync_one: S, emit: E) -> usize
+where
+    S: FnMut(
+        &SyncTarget,
+        &mut dyn FnMut(u32, u32), // export progress
+        &mut dyn FnMut(u64, u64), // copy progress
+    ) -> Result<(), String>,
+    E: Fn(SyncAllEvent),
+```
+
+The command passes the real things (`sync_project` and the Channel); the `#[cfg(test)]` module passes fakes: a `sync_one` that just calls the progress callbacks a few times (or returns `Err`), and an `emit` that pushes into a `Vec`. This is the Rust version of "dependency injection by passing functions in", without any traits or mock libraries.
+
+Three details are worth knowing:
+
+- **`Fn` vs `FnMut` vs `FnOnce`.** These are the three closure traits. `FnOnce` can be called once (it may consume what it captured). `FnMut` can be called many times but needs exclusive (`&mut`) access because it may mutate its captures. `Fn` only needs shared (`&`) access. `emit` is called from the loop *and* from inside both progress callbacks, so several closures hold a reference to it at once. Rust only allows many references at once if they're all shared, so `emit` must be `Fn`. `Channel::send` takes `&self`, so the real sink is already `Fn`.
+- **`RefCell` gives a `Fn` closure mutation back.** The test sink has to push into a `Vec`, which is mutation. `RefCell<Vec<_>>` moves the "only one mutable borrow at a time" check from compile time to run time: `events.borrow_mut().push(e)` works through a shared reference, and panics only if two mutable borrows overlap (they can't here, since every push finishes before the next event). `events.into_inner()` then hands back the plain `Vec` to assert on.
+- **`&mut dyn FnMut` in a closure's signature.** Elsewhere, progress callbacks are `impl FnMut(...)` (see the chunked-I/O entry above), so each closure type gets its own compiled copy. That doesn't work for the arguments of `sync_one`, because `sync_one` is itself a closure, and a closure's parameters must each have one concrete type. A trait object (`dyn FnMut`) is that one type: "some callable, resolved at run time". A `&mut dyn FnMut` also implements `FnMut` itself, which is why the command can pass `on_export`/`on_copy` straight into `sync_project`'s `impl FnMut` parameters.
+
+---
+
 ## `notify` — filesystem watching from a background thread
 
 `commands/watch.rs` watches the entire configured library root — both the manga level (its immediate subfolders) and the chapter level (each manga's immediate subfolders) — for the whole app session, so adding/removing manga or chapter folders never requires restarting or re-importing anything.
