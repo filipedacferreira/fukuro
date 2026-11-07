@@ -308,8 +308,9 @@ export const ProjectRow: FC<ProjectRowProps> = ({
                 Last exported: {formatRelativeTime(project.lastExportedAt)}
               </span>
             )}
-            {/* Live progress while "Send to device" (from the menu) is running */}
-            {syncing && syncProgress && (
+            {/* Live progress while "Send to device" (from the menu) is running; reads
+                "Preparing…" until the backend's first event names the phase */}
+            {syncing && (
               <KoboSyncProgress
                 progress={syncProgress}
                 className="mt-1 max-w-64"

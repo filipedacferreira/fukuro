@@ -101,8 +101,9 @@ export const ExportPanel: FC<ExportPanelProps> = ({ project, hasChapters }) => {
             className="max-w-32"
           />
         )}
-        {/* Same progress line as the Kobo drawer: phase, percentage, Pages/bytes */}
-        {syncing && syncProgress && (
+        {/* Same progress line as the Kobo drawer: phase, percentage, Pages/bytes ("Preparing…"
+            until the first event) */}
+        {syncing && (
           <KoboSyncProgress
             progress={syncProgress}
             size="sm"

@@ -5,14 +5,15 @@ import { cn } from '@/lib/utils/classnames'
 import type { SyncProgress } from '@/types'
 
 interface KoboSyncProgressProps {
-  progress: SyncProgress
+  // Null while a send has started but the backend hasn't reported a phase yet.
+  progress: SyncProgress | null
   size?: 'xs' | 'sm'
   className?: string
 }
 
 // The detail text next to the phase label: "42% · 120 MB of 284 MB" when copying (bytes) or
-// "42% · 12 of 30 pages" when exporting (Pages). Empty until the first real event reports a
-// total — useKoboSync seeds `{ total: 0 }` before the backend has said anything.
+// "42% · 12 of 30 pages" when exporting (Pages). Null if the event reports no total yet, so
+// the line never shows a meaningless "0%".
 const formatProgressDetail = ({
   phase,
   current,
@@ -30,23 +31,29 @@ const formatProgressDetail = ({
 // Live progress line for one project's Kobo sync: bar + "Exporting"/"Copying" + percentage +
 // Pages/bytes. Shared by every place a Kobo send shows progress — the drawer row (single send
 // or the active project of a Sync all), the project card, and the editor's ExportPanel — so
-// single and bulk sends always read the same.
+// single and bulk sends always read the same. Before the first event (`progress` null) it
+// reads "Preparing…" over an empty bar rather than guessing a phase.
 export const KoboSyncProgress: FC<KoboSyncProgressProps> = ({
   progress,
   size = 'xs',
   className,
 }) => {
-  const detail = formatProgressDetail(progress)
+  const label = !progress
+    ? 'Preparing'
+    : progress.phase === 'exporting'
+      ? 'Exporting'
+      : 'Copying'
+  const detail = progress ? formatProgressDetail(progress) : null
 
   return (
     <div className={cn('flex flex-col gap-1', className)}>
       <Progress
-        value={progress.current}
-        max={progress.total || 1}
+        value={progress?.current ?? 0}
+        max={progress?.total || 1}
         size={size}
       />
       <p className="truncate text-2xs text-foreground-secondary">
-        {progress.phase === 'exporting' ? 'Exporting' : 'Copying'}
+        {label}
         {detail ? ` · ${detail}` : '…'}
       </p>
     </div>
