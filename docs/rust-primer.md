@@ -143,6 +143,19 @@ The `Channel<ExportEvent>` generic on the Rust side and `Channel<ExportEvent>` o
 
 This bug can sit latent for a long time because it only breaks when the frontend actually reads the affected field — `ExportEvent::Done`'s `output_path` was silently serialising wrong from the very first version of this file, but nothing ever broke because every caller used the local `outputPath` variable it already had instead of reading `event.outputPath`. It surfaced for real once `SyncAllEvent::Progress`'s `project_id` field was read directly off the event (`event.projectId`) to route a per-project UI update — the field came through as `undefined` (not present under that name), with no error thrown anywhere, since accessing a missing property on an object is `undefined`, not a crash. If a Channel event ever reads back `undefined` for a field you know the Rust side sent, check for this before anything else.
 
+**A fieldless (unit-only) enum serialises as a plain string, not a tagged object.** Not every enum sent over a Channel is an event. `SyncPhase` (kobo.rs) is just a label carried *inside* an event:
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncPhase {
+    Exporting,
+    Copying,
+}
+```
+
+None of its variants have fields, so serde has nothing to wrap: each variant becomes just its name as a JSON string, and `rename_all = "camelCase"` renames that string (`SyncPhase::Exporting` → `"exporting"`). It needs no `tag = "type"` (there's no object to put a tag in) and no `rename_all_fields` (there are no fields). So `SyncAllEvent::ProjectProgress { phase: SyncPhase::Copying, .. }` goes out as `{ "type": "projectProgress", "phase": "copying", ... }`, and the TypeScript side models the phase as a string union, `type SyncPhase = 'exporting' | 'copying'` in `types.ts`. If a variant ever gains a field, this stops being true: without a `tag`, that variant serialises as an object like `{ "copying": { ... } }`, and the TS type has to change with it.
+
 ---
 
 ## `#[tauri::command]` — registering a function as callable from JS
