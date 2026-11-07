@@ -234,8 +234,8 @@ fn fetch_sync_target(conn: &Connection, project_id: &str) -> Result<SyncTarget, 
 // re-running `write_cbz_archive` whenever that cache file is missing/never existed *or* its
 // content is known-stale (`target.last_kobo_export_at` is null — see its doc comment) — then
 // chunked-copies it onto `device`. Returns the resulting on-device path. Shared by
-// `sync_project_to_kobo` (per-project button, byte-level progress surfaced to the caller)
-// and `sync_all_to_kobo` (bulk backfill, which only needs success/failure per project), so
+// `sync_project_to_kobo` (per-project button) and `sync_all_to_kobo` (bulk backfill, via
+// `run_sync_all`), both of which forward the two progress callbacks to the frontend, so
 // the "ensure export, then copy" sequence has one implementation instead of two.
 fn sync_project(
     app_handle: &AppHandle,
@@ -354,22 +354,46 @@ pub fn sync_project_to_kobo(
     Ok(())
 }
 
-// Emitted once per project as `sync_all_to_kobo` works through its queue — deliberately
-// coarser than `SyncEvent` (no byte-level progress): the roadmap calls for the same
-// idle/syncing/done/failed granularity Batch export uses per row, not a progress bar per file.
+// Which half of a project's sync a `SyncAllEvent::ProjectProgress` describes. Serialized as
+// the plain strings "exporting" / "copying" (a unit-only enum with `rename_all` becomes a
+// string, not an object), matching `SyncEvent`'s variant names so the frontend can feed both
+// streams into the same `SyncProgress` shape.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncPhase {
+    Exporting,
+    Copying,
+}
+
+// Events streamed while `sync_all_to_kobo` works through its queue.
 //
-// `Started` fires immediately *before* a project's sync begins, `Progress` immediately after
-// it finishes. The frontend needs the `Started` signal to light up the currently-syncing row:
-// it can't predict which project is next on its own, since the candidate set is computed here
-// (it includes the device-missing scan below, which the UI can't replicate) and the DB query
-// imposes no ordering the UI could mirror.
-#[derive(Clone, Serialize)]
+// This used to be deliberately coarse — one event per finished project, "not a progress bar
+// per file". That decision is reversed: with large projects (hundreds of MB, sometimes needing
+// a re-export first) the coarse view sat on a spinner for minutes and looked stuck. Bulk sync
+// now forwards the same export/copy progress a single send gets, as `ProjectProgress`.
+//
+// Per project the order is always: `Started` → zero or more `ProjectProgress` (any
+// `Exporting` ones always before any `Copying` ones) → `Finished`. A single `Done` closes the
+// run. The frontend needs `Started` to light up the active row: it can't predict which project
+// is next on its own, since the candidate set is computed here (it includes the device-missing
+// scan below, which the UI can't replicate) and the DB query imposes no ordering to mirror.
+//
+// Units in `ProjectProgress` match `SyncEvent`: Pages when exporting, bytes when copying.
+// Both fit in u64, so one variant carries either (`u32` page counts widen losslessly).
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum SyncAllEvent {
     Started {
         project_id: String,
     },
-    Progress {
+    ProjectProgress {
+        project_id: String,
+        phase: SyncPhase,
+        current: u64,
+        total: u64,
+    },
+    // Named `Finished` (was `Progress`) so "progress" only ever means within-project progress.
+    Finished {
         current: usize,
         total: usize,
         project_id: String,
@@ -453,34 +477,339 @@ pub fn sync_all_to_kobo(
             .collect()
     };
 
-    let total = targets.len();
     let app_handle = app_handle.clone();
 
     std::thread::spawn(move || {
-        let mut synced = 0;
-        for (i, target) in targets.iter().enumerate() {
-            // Tell the UI this row is now the one uploading, so it can show a live spinner —
-            // see `SyncAllEvent`'s doc comment for why the frontend can't infer this itself.
-            let _ = on_event.send(SyncAllEvent::Started {
-                project_id: target.project_id.clone(),
-            });
-            // Byte/page-level progress isn't surfaced here — see `SyncAllEvent`'s doc comment.
-            let result = sync_project(&app_handle, &device, target, |_, _| {}, |_, _| {});
-            let success = result.is_ok();
-            if success {
-                synced += 1;
-            }
-            let _ = on_event.send(SyncAllEvent::Progress {
-                current: i + 1,
-                total,
-                project_id: target.project_id.clone(),
-                project_name: target.project_name.clone(),
-                success,
-                error: result.err(),
-            });
-        }
-        let _ = on_event.send(SyncAllEvent::Done { synced, total });
+        run_sync_all(
+            &targets,
+            // The real per-project operation: the shared `sync_project`, with its two progress
+            // callbacks forwarded to whatever `run_sync_all` hands in. The on-device path it
+            // returns isn't needed for bulk sync, so `.map(|_| ())` drops it. A `&mut dyn FnMut`
+            // is itself an `FnMut`, so the callbacks can be passed straight through.
+            |target, on_export, on_copy| {
+                sync_project(&app_handle, &device, target, on_export, on_copy).map(|_| ())
+            },
+            // The real event sink: the Tauri Channel. A send error only means the frontend
+            // stopped listening (e.g. window closed), which is no reason to abort the run.
+            |event| {
+                let _ = on_event.send(event);
+            },
+        );
     });
 
     Ok(())
+}
+
+// The body of a Sync all run, pulled out of `sync_all_to_kobo` so it can be unit-tested
+// without Tauri. Both of its dependencies come in as closures:
+//
+// - `sync_one` performs one project's sync. It receives the target plus two progress
+//   callbacks (export Pages, copy bytes) to call as it goes, and returns success/failure.
+//   The command passes the real `sync_project`; tests pass a fake that calls the callbacks a
+//   fixed number of times and can be told to fail.
+// - `emit` receives every `SyncAllEvent`. The command passes the Tauri Channel; tests collect
+//   into a Vec.
+//
+// `emit` is `Fn` (not `FnMut`) on purpose: it's called both here in the loop *and* from inside
+// the two progress callbacks handed to `sync_one`, which means three places hold a reference
+// to it at once. Rust only allows that for shared (`&`) borrows, and only `Fn` can be called
+// through a shared borrow. `Channel::send` takes `&self`, so the real sink is naturally `Fn`;
+// a test sink gets mutation back via `RefCell`.
+//
+// The progress callbacks are `&mut dyn FnMut` rather than `impl FnMut` because `sync_one` is
+// itself a generic closure: a closure's parameter types must be concrete, so there's no way to
+// say "any callback type" there — a trait object is the one-type-fits-all stand-in.
+//
+// Returns the number of projects that synced successfully (also reported in `Done`).
+fn run_sync_all<S, E>(targets: &[SyncTarget], mut sync_one: S, emit: E) -> usize
+where
+    S: FnMut(
+        &SyncTarget,
+        &mut dyn FnMut(u32, u32), // export progress: Pages written / total Pages
+        &mut dyn FnMut(u64, u64), // copy progress: bytes copied / total bytes
+    ) -> Result<(), String>,
+    E: Fn(SyncAllEvent),
+{
+    let total = targets.len();
+    let mut synced = 0;
+
+    for (i, target) in targets.iter().enumerate() {
+        // Tell the UI this row is now the active one — see `SyncAllEvent`'s doc comment for
+        // why the frontend can't infer this itself.
+        emit(SyncAllEvent::Started {
+            project_id: target.project_id.clone(),
+        });
+
+        // Forward export progress (Pages) as live `ProjectProgress` events. `u64::from` widens
+        // the u32 page counts so both phases share one variant's field types.
+        let mut on_export = |current: u32, total: u32| {
+            emit(SyncAllEvent::ProjectProgress {
+                project_id: target.project_id.clone(),
+                phase: SyncPhase::Exporting,
+                current: u64::from(current),
+                total: u64::from(total),
+            });
+        };
+        // Same for copy progress (bytes), which are already u64.
+        let mut on_copy = |current: u64, total: u64| {
+            emit(SyncAllEvent::ProjectProgress {
+                project_id: target.project_id.clone(),
+                phase: SyncPhase::Copying,
+                current,
+                total,
+            });
+        };
+
+        let result = sync_one(target, &mut on_export, &mut on_copy);
+        let success = result.is_ok();
+        if success {
+            synced += 1;
+        }
+
+        // One `Finished` per project, success or not — a failure partway through still ends
+        // that project's events here, and the loop carries on with the next one.
+        emit(SyncAllEvent::Finished {
+            current: i + 1,
+            total,
+            project_id: target.project_id.clone(),
+            project_name: target.project_name.clone(),
+            success,
+            error: result.err(),
+        });
+    }
+
+    emit(SyncAllEvent::Done { synced, total });
+    synced
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    // Builds a target with only the fields the loop itself reads (id + name); the cache
+    // timestamp is irrelevant here since the fake sync operation decides whether to "export".
+    fn target(id: &str) -> SyncTarget {
+        SyncTarget {
+            project_id: id.to_string(),
+            project_name: format!("Project {id}"),
+            last_kobo_export_at: None,
+        }
+    }
+
+    #[test]
+    fn zero_targets_emits_only_done() {
+        let events = RefCell::new(Vec::new());
+        run_sync_all(&[], |_, _, _| Ok(()), |e| events.borrow_mut().push(e));
+        assert_eq!(
+            events.into_inner(),
+            vec![SyncAllEvent::Done {
+                synced: 0,
+                total: 0
+            }]
+        );
+    }
+
+    // Shorthand for the expected `ProjectProgress` events, to keep the assertions readable.
+    fn progress(id: &str, phase: SyncPhase, current: u64, total: u64) -> SyncAllEvent {
+        SyncAllEvent::ProjectProgress {
+            project_id: id.to_string(),
+            phase,
+            current,
+            total,
+        }
+    }
+
+    // Shorthand for the expected `Started` event that opens each project's group of events.
+    fn started(id: &str) -> SyncAllEvent {
+        SyncAllEvent::Started {
+            project_id: id.to_string(),
+        }
+    }
+
+    // Shorthand for the expected `Finished` event that closes each project's group. `current`
+    // and `total` are whole Projects done so far and in the whole run. `error: None` means the
+    // project succeeded, `Some(msg)` that it failed with that message. The name is derived from
+    // the id exactly as `target` builds it, so the two always line up.
+    fn finished(id: &str, current: usize, total: usize, error: Option<&str>) -> SyncAllEvent {
+        SyncAllEvent::Finished {
+            current,
+            total,
+            project_id: id.to_string(),
+            project_name: format!("Project {id}"),
+            success: error.is_none(),
+            error: error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn project_needing_export_streams_export_then_copy_progress() {
+        let events = RefCell::new(Vec::new());
+        let synced = run_sync_all(
+            &[target("a")],
+            // Fake sync: 2 Pages exported, then 2 MiB copied in two chunks.
+            |_, on_export, on_copy| {
+                on_export(1, 2);
+                on_export(2, 2);
+                on_copy(0, 2048);
+                on_copy(1024, 2048);
+                on_copy(2048, 2048);
+                Ok(())
+            },
+            |e| events.borrow_mut().push(e),
+        );
+
+        assert_eq!(synced, 1);
+        assert_eq!(
+            events.into_inner(),
+            vec![
+                started("a"),
+                progress("a", SyncPhase::Exporting, 1, 2),
+                progress("a", SyncPhase::Exporting, 2, 2),
+                progress("a", SyncPhase::Copying, 0, 2048),
+                progress("a", SyncPhase::Copying, 1024, 2048),
+                progress("a", SyncPhase::Copying, 2048, 2048),
+                finished("a", 1, 1, None),
+                SyncAllEvent::Done {
+                    synced: 1,
+                    total: 1
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn project_with_fresh_cache_streams_copy_progress_only() {
+        let events = RefCell::new(Vec::new());
+        run_sync_all(
+            &[target("a")],
+            // Fake sync whose cache is fresh: no export callback at all, straight to copying.
+            |_, _, on_copy| {
+                on_copy(0, 10);
+                on_copy(10, 10);
+                Ok(())
+            },
+            |e| events.borrow_mut().push(e),
+        );
+
+        assert_eq!(
+            events.into_inner(),
+            vec![
+                started("a"),
+                progress("a", SyncPhase::Copying, 0, 10),
+                progress("a", SyncPhase::Copying, 10, 10),
+                finished("a", 1, 1, None),
+                SyncAllEvent::Done {
+                    synced: 1,
+                    total: 1
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn failure_partway_finishes_that_project_and_continues_with_the_next() {
+        let events = RefCell::new(Vec::new());
+        let synced = run_sync_all(
+            &[target("a"), target("b")],
+            // "a" fails halfway through copying; "b" succeeds.
+            |t, _, on_copy| {
+                on_copy(0, 10);
+                if t.project_id == "a" {
+                    on_copy(5, 10);
+                    return Err("device full".to_string());
+                }
+                on_copy(10, 10);
+                Ok(())
+            },
+            |e| events.borrow_mut().push(e),
+        );
+
+        assert_eq!(synced, 1);
+        assert_eq!(
+            events.into_inner(),
+            vec![
+                started("a"),
+                progress("a", SyncPhase::Copying, 0, 10),
+                progress("a", SyncPhase::Copying, 5, 10),
+                finished("a", 1, 2, Some("device full")),
+                started("b"),
+                progress("b", SyncPhase::Copying, 0, 10),
+                progress("b", SyncPhase::Copying, 10, 10),
+                finished("b", 2, 2, None),
+                SyncAllEvent::Done {
+                    synced: 1,
+                    total: 2
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn several_projects_stay_grouped_and_count_up() {
+        let events = RefCell::new(Vec::new());
+        run_sync_all(
+            &[target("a"), target("b"), target("c")],
+            // "b" needs an export first; the others go straight to copying.
+            |t, on_export, on_copy| {
+                if t.project_id == "b" {
+                    on_export(1, 1);
+                }
+                on_copy(1, 1);
+                Ok(())
+            },
+            |e| events.borrow_mut().push(e),
+        );
+
+        assert_eq!(
+            events.into_inner(),
+            vec![
+                started("a"),
+                progress("a", SyncPhase::Copying, 1, 1),
+                finished("a", 1, 3, None),
+                started("b"),
+                progress("b", SyncPhase::Exporting, 1, 1),
+                progress("b", SyncPhase::Copying, 1, 1),
+                finished("b", 2, 3, None),
+                started("c"),
+                progress("c", SyncPhase::Copying, 1, 1),
+                finished("c", 3, 3, None),
+                SyncAllEvent::Done {
+                    synced: 3,
+                    total: 3
+                },
+            ]
+        );
+    }
+
+    // Guards the `rename_all_fields` gotcha (see CLAUDE.md): without it, the fields inside
+    // each variant would silently ship as snake_case.
+    #[test]
+    fn events_serialize_with_camel_case_fields() {
+        let json = serde_json::to_value(progress("a", SyncPhase::Exporting, 3, 9)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "projectProgress",
+                "projectId": "a",
+                "phase": "exporting",
+                "current": 3,
+                "total": 9,
+            })
+        );
+
+        let json = serde_json::to_value(finished("a", 1, 2, Some("boom"))).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "finished",
+                "current": 1,
+                "total": 2,
+                "projectId": "a",
+                "projectName": "Project a",
+                "success": false,
+                "error": "boom",
+            })
+        );
+    }
 }

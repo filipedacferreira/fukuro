@@ -2,13 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { useState } from 'react'
 import { toast } from '@/components/ui/toaster'
 import { api } from '@/lib/tauri'
-import type { Project, SyncEvent } from '@/types'
-
-export interface SyncProgress {
-  phase: 'exporting' | 'copying'
-  current: number
-  total: number
-}
+import type { Project, SyncEvent, SyncProgress } from '@/types'
 
 type ProjectSyncFields = Pick<Project, 'lastKoboExportAt' | 'lastSyncedAt'>
 
@@ -21,31 +15,37 @@ type ProjectSyncFields = Pick<Project, 'lastKoboExportAt' | 'lastSyncedAt'>
 // `onSynced` lets the caller optimistically patch its own copy of the project's sync
 // timestamps — there's no dedicated "get one project" command to refetch from, and a full
 // project-list rescan would be overkill for two fields we already know the new values of.
+//
+// `syncing` is tracked separately from `progress`: while a send is running, `progress` stays
+// null until the backend's first event says which phase it's in. Seeding a phase up front
+// would flash "Exporting…" for a send whose cache is fresh and goes straight to copying.
 export const useKoboSync = (
   project: Pick<Project, 'id' | 'name'>,
   onSynced: (patch: ProjectSyncFields) => void,
 ) => {
+  const [syncing, setSyncing] = useState(false)
   const [progress, setProgress] = useState<SyncProgress | null>(null)
 
+  // Ends the send, whichever way it ended (done, error event, or a rejected invoke).
+  const finish = () => {
+    setSyncing(false)
+    setProgress(null)
+  }
+
   const sync = async () => {
-    setProgress({ phase: 'exporting', current: 0, total: 0 })
+    setSyncing(true)
+    setProgress(null)
 
     const channel = new Channel<SyncEvent>()
     channel.onmessage = (event) => {
-      if (event.type === 'exporting') {
+      if (event.type === 'exporting' || event.type === 'copying') {
         setProgress({
-          phase: 'exporting',
-          current: event.current,
-          total: event.total,
-        })
-      } else if (event.type === 'copying') {
-        setProgress({
-          phase: 'copying',
+          phase: event.type,
           current: event.current,
           total: event.total,
         })
       } else if (event.type === 'done') {
-        setProgress(null)
+        finish()
         // now approximates the timestamps the Rust side just wrote — close enough for
         // outdated comparisons, and avoids a round-trip just to learn the exact
         // server-side value.
@@ -53,7 +53,7 @@ export const useKoboSync = (
         onSynced({ lastKoboExportAt: now, lastSyncedAt: now })
         toast({ title: 'Sent to device', description: project.name })
       } else if (event.type === 'error') {
-        setProgress(null)
+        finish()
         toast({ title: 'Send to device failed', description: event.message })
       }
     }
@@ -61,10 +61,10 @@ export const useKoboSync = (
     try {
       await api.syncProjectToKobo(project.id, channel)
     } catch (e) {
-      setProgress(null)
+      finish()
       toast({ title: 'Send to device failed', description: String(e) })
     }
   }
 
-  return { sync, progress, syncing: progress !== null }
+  return { sync, progress, syncing }
 }

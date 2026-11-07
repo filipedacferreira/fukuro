@@ -8,8 +8,46 @@ import { Progress } from '@/components/ui/progress'
 import { toast } from '@/components/ui/toaster'
 import { formatBytes, isKoboPending } from '@/lib/kobo'
 import { api } from '@/lib/tauri'
-import type { KoboDevice, Project, SyncAllEvent } from '@/types'
+import type { KoboDevice, Project, SyncAllEvent, SyncProgress } from '@/types'
 import { type KoboRowRunState, KoboSyncRow } from './kobo-sync-row'
+
+// How far the active project has got, as 0..1. When it exported during this run, exporting
+// covers the first half and copying the second; if it went straight to copying (fresh cache),
+// copying covers the whole fraction.
+const activeFraction = (progress: SyncProgress, exported: boolean): number => {
+  const ratio =
+    progress.total > 0 ? Math.min(progress.current / progress.total, 1) : 0
+  if (!exported) return ratio
+  return progress.phase === 'exporting' ? ratio / 2 : 0.5 + ratio / 2
+}
+
+// The project currently being synced in a bulk run and its live progress (from
+// `projectProgress`). `progress` is null between `started` and the first progress event;
+// `exported` records whether this project went through an Exporting phase, which decides how
+// its fraction is split in the overall bar (see `activeFraction`).
+interface ActiveProject {
+  projectId: string
+  progress: SyncProgress | null
+  exported: boolean
+}
+
+// Whole-Project count of a bulk run, for the footer's "X of N" and overall bar.
+interface RunProgress {
+  // Projects finished so far (SyncAllEvent `finished`'s `current`).
+  finished: number
+  // The run's real size, known only from the first `finished` event. Null until then.
+  total: number | null
+  // The pending count the UI could see when the run started. Only a guess: the backend may
+  // also sync device-missing copies the UI can't detect, so the real total can be larger.
+  guessedTotal: number
+}
+
+// The overall bar's max (and the N in "X of N"). Once the backend has reported its total, that
+// is exact. Before that it's the guess, but never less than the Projects finished plus the one
+// running, so a too-small guess can't push the bar past full (which would then jump back once
+// the real total arrives).
+const runTotal = (run: RunProgress, hasActive: boolean): number =>
+  run.total ?? Math.max(run.guessedTotal, run.finished + (hasActive ? 1 : 0))
 
 interface KoboSyncDrawerProps {
   device: KoboDevice
@@ -36,11 +74,10 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
   const [runStates, setRunStates] = useState<Record<string, KoboRowRunState>>(
     {},
   )
-  // Overall batch progress from SyncAllEvent's `current`/`total`. Null when no run is active.
-  const [runProgress, setRunProgress] = useState<{
-    current: number
-    total: number
-  } | null>(null)
+  // Overall batch progress (see RunProgress). Null when no run is active.
+  const [runProgress, setRunProgress] = useState<RunProgress | null>(null)
+  // The active project of a bulk run (see ActiveProject), cleared on its `finished`.
+  const [active, setActive] = useState<ActiveProject | null>(null)
 
   const pendingCount = projects.filter(isKoboPending).length
 
@@ -53,6 +90,18 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
       ),
     [projects],
   )
+
+  // `started` carries only an id, so the footer looks the active project's name up here. If it
+  // isn't in the list (e.g. removed mid-run), the name is simply left out.
+  const activeName = active
+    ? projects.find((p) => p.id === active.projectId)?.name
+    : undefined
+  // Overall bar value: finished Projects plus how far the active one has got, so the bar keeps
+  // moving during a long Project instead of only stepping when one finishes.
+  const overallValue =
+    (runProgress?.finished ?? 0) +
+    (active?.progress ? activeFraction(active.progress, active.exported) : 0)
+  const overallTotal = runProgress ? runTotal(runProgress, active !== null) : 0
 
   // Clears a single project's lingering run state (used after a successful single-row retry
   // patches its timestamps, so a previously-failed row stops reading "Failed").
@@ -80,18 +129,41 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
         projects.filter(isKoboPending).map((p) => [p.id, 'queued' as const]),
       ),
     )
-    setRunProgress({ current: 0, total: pendingCount })
+    setRunProgress({ finished: 0, total: null, guessedTotal: pendingCount })
 
     const channel = new Channel<SyncAllEvent>()
     channel.onmessage = (event) => {
       if (event.type === 'started') {
         setRunStates((prev) => ({ ...prev, [event.projectId]: 'syncing' }))
-      } else if (event.type === 'progress') {
+        setActive({
+          projectId: event.projectId,
+          progress: null,
+          exported: false,
+        })
+      } else if (event.type === 'projectProgress') {
+        // Not throttled (one event per Page / 1 MiB chunk, same as a single send). If very
+        // large files ever make the drawer stutter, coalesce here per animation frame first.
+        const { projectId, phase, current, total } = event
+        setActive((prev) => ({
+          projectId,
+          progress: { phase, current, total },
+          // Sticky: once this project has exported, copying keeps the half-and-half split.
+          exported:
+            phase === 'exporting' ||
+            (prev?.projectId === projectId && prev.exported),
+        }))
+      } else if (event.type === 'finished') {
+        setActive(null)
         setRunStates((prev) => ({
           ...prev,
           [event.projectId]: event.success ? 'done' : 'failed',
         }))
-        setRunProgress({ current: event.current, total: event.total })
+        // From here on the backend's total replaces the guess (see runTotal).
+        setRunProgress((prev) => ({
+          finished: event.current,
+          total: event.total,
+          guessedTotal: prev?.guessedTotal ?? event.total,
+        }))
         onProjectSynced(event.projectId, event.success)
         if (!event.success && event.error) {
           toast({
@@ -102,6 +174,7 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
       } else if (event.type === 'done') {
         setSyncingAll(false)
         setRunProgress(null)
+        setActive(null)
         // Keep only failed rows flagged (so they still show "Failed" + Retry); succeeded rows
         // fall back to their now-up-to-date resting status.
         setRunStates((prev) =>
@@ -127,6 +200,7 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
     } catch (e) {
       setSyncingAll(false)
       setRunProgress(null)
+      setActive(null)
       setRunStates({})
       toast({ title: 'Sync all failed', description: String(e) })
     }
@@ -178,6 +252,11 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
                 project={project}
                 bulkActive={syncingAll}
                 runState={runStates[project.id]}
+                bulkProgress={
+                  active?.projectId === project.id
+                    ? (active.progress ?? undefined)
+                    : undefined
+                }
                 onSynced={handleRowSynced}
               />
             ))}
@@ -187,15 +266,19 @@ export const KoboSyncDrawer: FC<KoboSyncDrawerProps> = ({
         <Drawer.Actions className="flex-col items-stretch gap-3">
           {runProgress && (
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-foreground-secondary text-xs">
-                <span>Syncing…</span>
-                <span>
-                  {runProgress.current} of {runProgress.total || '…'}
+              <div className="flex items-center justify-between gap-3 text-foreground-secondary text-xs">
+                {/* Names the active project; left generic if it isn't in our list */}
+                <span className="min-w-0 truncate">
+                  {activeName ? `Syncing ${activeName}…` : 'Syncing…'}
+                </span>
+                {/* Whole Projects only — the bar below carries the fractional part */}
+                <span className="shrink-0">
+                  {runProgress.finished} of {overallTotal || '…'}
                 </span>
               </div>
               <Progress
-                value={runProgress.current}
-                max={runProgress.total || 1}
+                value={overallValue}
+                max={overallTotal || 1}
                 size="sm"
               />
             </div>

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { CoverDialog } from '@/components/cover-dialog'
 import { CoverThumbnail } from '@/components/cover-thumbnail'
+import { KoboSyncProgress } from '@/components/kobo-sync-progress'
 import { Button, IconButton } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -170,7 +171,11 @@ export const ProjectRow: FC<ProjectRowProps> = ({
 }) => {
   const [localName, setLocalName] = useState(project.name)
   const [exporting, setExporting] = useState(false)
-  const { sync: syncToKobo, syncing } = useKoboSync(project, onSynced)
+  const {
+    sync: syncToKobo,
+    progress: syncProgress,
+    syncing,
+  } = useKoboSync(project, onSynced)
   const [cover, setCover] = useState<CoverInfo>({
     coverPath: project.coverPath,
     coverThumbnailPath: project.coverThumbnailPath,
@@ -302,6 +307,14 @@ export const ProjectRow: FC<ProjectRowProps> = ({
               <span className="text-foreground-secondary text-xs">
                 Last exported: {formatRelativeTime(project.lastExportedAt)}
               </span>
+            )}
+            {/* Live progress while "Send to device" (from the menu) is running; reads
+                "Preparing…" until the backend's first event names the phase */}
+            {syncing && (
+              <KoboSyncProgress
+                progress={syncProgress}
+                className="mt-1 max-w-64"
+              />
             )}
           </div>
         </div>

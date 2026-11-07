@@ -143,6 +143,19 @@ The `Channel<ExportEvent>` generic on the Rust side and `Channel<ExportEvent>` o
 
 This bug can sit latent for a long time because it only breaks when the frontend actually reads the affected field — `ExportEvent::Done`'s `output_path` was silently serialising wrong from the very first version of this file, but nothing ever broke because every caller used the local `outputPath` variable it already had instead of reading `event.outputPath`. It surfaced for real once `SyncAllEvent::Progress`'s `project_id` field was read directly off the event (`event.projectId`) to route a per-project UI update — the field came through as `undefined` (not present under that name), with no error thrown anywhere, since accessing a missing property on an object is `undefined`, not a crash. If a Channel event ever reads back `undefined` for a field you know the Rust side sent, check for this before anything else.
 
+**A fieldless (unit-only) enum serialises as a plain string, not a tagged object.** Not every enum sent over a Channel is an event. `SyncPhase` (kobo.rs) is just a label carried *inside* an event:
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncPhase {
+    Exporting,
+    Copying,
+}
+```
+
+None of its variants have fields, so serde has nothing to wrap: each variant becomes just its name as a JSON string, and `rename_all = "camelCase"` renames that string (`SyncPhase::Exporting` → `"exporting"`). It needs no `tag = "type"` (there's no object to put a tag in) and no `rename_all_fields` (there are no fields). So `SyncAllEvent::ProjectProgress { phase: SyncPhase::Copying, .. }` goes out as `{ "type": "projectProgress", "phase": "copying", ... }`, and the TypeScript side models the phase as a string union, `type SyncPhase = 'exporting' | 'copying'` in `types.ts`. If a variant ever gains a field, this stops being true: without a `tag`, that variant serialises as an object like `{ "copying": { ... } }`, and the TS type has to change with it.
+
 ---
 
 ## `#[tauri::command]` — registering a function as callable from JS
@@ -536,6 +549,31 @@ fn copy_with_progress(
 ```
 
 `impl FnMut(u64, u64)` is the same shape `write_cbz_archive` (export.rs) uses for its own per-page progress callback — the caller passes a plain closure (usually one that sends a Tauri Channel event), and the compiler generates a dedicated, inlined copy of `copy_with_progress` for whatever closure type is passed in (monomorphisation), rather than paying for dynamic dispatch through a `Box<dyn FnMut>`. `read()` returning `0` is the standard Rust I/O convention for end-of-file — it's not an error, just the loop's exit condition.
+
+---
+
+## Closures as dependencies — an event sink and a sync operation
+
+`sync_all_to_kobo` (kobo.rs) used to loop over its targets inline, calling `sync_project` and `on_event.send(...)` directly. Both need a real Tauri app (a DB, a mounted Kobo, an IPC Channel), so the loop couldn't be tested. The loop now lives in `run_sync_all`, which takes those two dependencies as closures instead:
+
+```rust
+fn run_sync_all<S, E>(targets: &[SyncTarget], mut sync_one: S, emit: E) -> usize
+where
+    S: FnMut(
+        &SyncTarget,
+        &mut dyn FnMut(u32, u32), // export progress
+        &mut dyn FnMut(u64, u64), // copy progress
+    ) -> Result<(), String>,
+    E: Fn(SyncAllEvent),
+```
+
+The command passes the real things (`sync_project` and the Channel); the `#[cfg(test)]` module passes fakes: a `sync_one` that just calls the progress callbacks a few times (or returns `Err`), and an `emit` that pushes into a `Vec`. This is the Rust version of "dependency injection by passing functions in", without any traits or mock libraries.
+
+Three details are worth knowing:
+
+- **`Fn` vs `FnMut` vs `FnOnce`.** These are the three closure traits. `FnOnce` can be called once (it may consume what it captured). `FnMut` can be called many times but needs exclusive (`&mut`) access because it may mutate its captures. `Fn` only needs shared (`&`) access. `emit` is called from the loop *and* from inside both progress callbacks, so several closures hold a reference to it at once. Rust only allows many references at once if they're all shared, so `emit` must be `Fn`. `Channel::send` takes `&self`, so the real sink is already `Fn`.
+- **`RefCell` gives a `Fn` closure mutation back.** The test sink has to push into a `Vec`, which is mutation. `RefCell<Vec<_>>` moves the "only one mutable borrow at a time" check from compile time to run time: `events.borrow_mut().push(e)` works through a shared reference, and panics only if two mutable borrows overlap (they can't here, since every push finishes before the next event). `events.into_inner()` then hands back the plain `Vec` to assert on.
+- **`&mut dyn FnMut` in a closure's signature.** Elsewhere, progress callbacks are `impl FnMut(...)` (see the chunked-I/O entry above), so each closure type gets its own compiled copy. That doesn't work for the arguments of `sync_one`, because `sync_one` is itself a closure, and a closure's parameters must each have one concrete type. A trait object (`dyn FnMut`) is that one type: "some callable, resolved at run time". A `&mut dyn FnMut` also implements `FnMut` itself, which is why the command can pass `on_export`/`on_copy` straight into `sync_project`'s `impl FnMut` parameters.
 
 ---
 
